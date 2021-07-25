@@ -7,18 +7,20 @@ CURL* curl_handle;
 
 static size_t curl_write_fn(void *start, size_t sz, size_t bytes, void *file)
 {
+  // Used by curl to write to a file.
   return fwrite(start, sz, bytes, file);
 }
 
 void url_to_file(char* url, char* filename)
 {
-  curl_easy_setopt(curl_handle, CURLOPT_URL, url);
-  curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
-  curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, curl_write_fn);
-  curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+  // Writes data from a URL to a file.
   FILE* out_file = fopen(filename, "wb");
   if (!out_file) { fprintf(stderr, "Cannot load URL to file!\n"); exit(EXIT_FAILURE); }
-  curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file);
+  curl_easy_setopt(curl_handle, CURLOPT_URL, url);                     // Set the URL
+  curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);               // Disable the progress bar
+  curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, curl_write_fn); // Use my write function
+  curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);           // Follow redirects
+  curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file);          // Set output file
   curl_easy_perform(curl_handle);
   fclose(out_file);
 }
