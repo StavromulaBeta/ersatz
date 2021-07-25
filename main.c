@@ -15,6 +15,7 @@ void url_to_file(char* url, char* filename)
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
   curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, curl_write_fn);
+  curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
   FILE* out_file = fopen(filename, "wb");
   if (!out_file) { fprintf(stderr, "Cannot load URL to file!\n"); exit(EXIT_FAILURE); }
   curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file);
