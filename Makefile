@@ -1,7 +1,7 @@
 CC=gcc
 
 build: main.c
-	$(CC) main.c -o main
+	$(CC) main.c -lcurl -o main
 
 clean:
 	rm -f main
