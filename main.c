@@ -12,15 +12,16 @@
 
 CURL* curl_handle;
 
-void url_to_file(char* url, char* filename)
+FILE* url_to_file(char* url)
 {
   // Writes data from a URL to a file.
-  FILE* out_file = fopen(filename, "wb");
-  if (!out_file) throw_error("Cannot load URL %s to file %s", url, filename);
+  FILE* out_file = tmpfile(); // Make a temporary file
+  if (!out_file) throw_error("Cannot load URL %s", url);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);            // Set the URL
   curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file); // Set output file
   curl_easy_perform(curl_handle);
-  fclose(out_file);
+  rewind(out_file);
+  return out_file;
 }
 
 int main()
@@ -35,7 +36,13 @@ int main()
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);     // Disable the progress bar
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
   // Actual code
-  url_to_file("www.wikipedia.com", "wikipedia.out");
+  FILE* test = url_to_file("www.wikipedia.com");
+  char c;
+  while ((c = fgetc(test)) != EOF)
+  {
+    putc(c, stdout);
+  }
+  fclose(test);
   // Cleanup
   curl_easy_cleanup(curl_handle);
 }
