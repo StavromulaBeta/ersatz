@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <curl/curl.h>
+#include <libxml/HTMLparser.h>
 #include "main.h"
 
 CURL* curl_handle;
@@ -24,11 +25,36 @@ FILE* url_to_file(char* url)
   return out_file;
 }
 
+static void print_html(xmlNodePtr ptr, short indent)
+{
+  for (; ptr ; ptr = ptr->next)
+  {
+    switch (ptr->type)
+    {
+      case XML_ELEMENT_NODE:
+        for (short i = 0; i < indent; ++i) putc('\t', stdout);
+        printf("<%s>\n", ptr->name);
+        break;
+      case XML_TEXT_NODE:
+        for (short i = 0; i < indent; ++i) putc('\t', stdout);
+        printf("%s", ptr->content);
+        break;
+      default:;
+    }
+    print_html(ptr->children, indent + 1);
+  }
+}
+
+htmlDocPtr parse_html_file(FILE* fp, char* url)
+{
+  htmlDocPtr doc = htmlReadFd(fileno(fp), url, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_NONET);
+  if (!doc) throw_error("Cannot parse file");
+  return doc;
+}
+
 int main()
 {
-  // Bind error signal handlinjg functions.
-  char signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE, SIGTERM, SIGCHLD };
-  for (size_t i = 0; i < sizeof(signals); ++i) signal(signals[i], handle_error_signal);
+  bind_error_signals();
   // Init libcURL
   curl_global_init(CURL_GLOBAL_ALL);
   curl_handle = curl_easy_init();
@@ -36,14 +62,15 @@ int main()
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);     // Disable the progress bar
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
   // Actual code
-  FILE* test = url_to_file("www.wikipedia.com");
-  char c;
-  while ((c = fgetc(test)) != EOF)
-  {
-    putc(c, stdout);
-  }
-  fclose(test);
+  char* url       = "www.wikipedia.org";
+  FILE* html      = url_to_file(url);
+  htmlDocPtr doc  = parse_html_file(html, url);
+  htmlNodePtr ptr = xmlDocGetRootElement(doc);
+  print_html(ptr, 0);
   // Cleanup
+  xmlFreeDoc(doc);
+  xmlCleanupParser();
+  fclose(html);
   curl_easy_cleanup(curl_handle);
 }
 
@@ -61,10 +88,16 @@ __attribute__((format(printf, 1, 2))) void throw_error(char* fmt, ...)
   }
   fputs("\033[0;2m", stderr);
   void *trace_array[10];
-  puts("begin backtrace...");
+  fputs("begin backtrace...\n", stderr);
   size_t size = backtrace(trace_array, 10);
   backtrace_symbols_fd(trace_array, size, STDERR_FILENO);
   exit(EXIT_FAILURE);
+}
+
+void bind_error_signals()
+{
+  char signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE, SIGTERM, SIGCHLD };
+  for (size_t i = 0; i < sizeof(signals); ++i) signal(signals[i], handle_error_signal);
 }
 
 _Noreturn void handle_error_signal(int sig)
