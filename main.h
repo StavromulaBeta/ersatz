@@ -22,3 +22,5 @@ void bind_error_signals();
 node* simplify_html(htmlNodePtr, node*);
 int insensitive_hash(const char*);
 node* alloc_node(node_type, void*, node*);
+void print_simplified_html(node*);
+void render_simplified_html(node*);
