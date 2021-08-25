@@ -9,10 +9,14 @@
 #include <unistd.h>
 #include <curl/curl.h>
 #include <libxml/HTMLparser.h>
+#include <libxml/uri.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h>
 #include "SDL_render.h"
 #include "main.h"
+
+char* current_url = NULL;
 
 CURL* curl_handle;
 char* window_title = "";
@@ -20,19 +24,31 @@ char* window_title = "";
 int plotter_x = 0, plotter_y = 0;
 int scroll_offset = 0;
 
-TTF_Font* small_font;
-TTF_Font* large_font;
-
 SDL_Renderer* renderer;
 
 SDL_Color black = {0, 0, 0, 255};
 SDL_Color blue  = {0, 0, 255, 255};
+SDL_Color gray  = {128, 128, 128, 255};
 SDL_Color text_color;
 
 TTF_Font* regular_font;
 TTF_Font* bold_font;
 TTF_Font* italic_font;
 TTF_Font* current_font;
+
+
+char* add_urls(char* url1, char* url2)
+{
+  char* ret;
+  CURLU *h;
+  CURLUcode uc;
+  int flags = CURLU_GUESS_SCHEME;
+  h = curl_url();
+  uc = curl_url_set(h, CURLUPART_URL, url1, flags);
+  uc = curl_url_set(h, CURLUPART_URL, url2, flags);
+  uc = curl_url_get(h, CURLUPART_URL, &ret, flags);
+  return ret;
+}
 
 void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font)
 {
@@ -90,7 +106,7 @@ linebreak:
 
 static void print_tag_hashes()
 {
-  char* arr[] = {"TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG"};
+  char* arr[] = {"TR", "TD", "TH", "TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG"};
   for (size_t i = 0; i < sizeof(arr) / sizeof(arr[0]); ++i)
   {
     printf("#define %s_TAG %i\n", arr[i], insensitive_hash(arr[i]));
@@ -104,13 +120,15 @@ FILE* url_to_file(char* url)
   if (!out_file) throw_error("Cannot load URL %s", url);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);            // Set the URL
   curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file); // Set output file
-  curl_easy_perform(curl_handle);
+  int err = curl_easy_perform(curl_handle);
+  if (err) throw_error((char*)curl_easy_strerror(err));
   rewind(out_file);
   return out_file;
 }
 
 htmlDocPtr parse_html_file(FILE* fp, char* url)
 {
+  xmlSubstituteEntitiesDefault(true);
   htmlDocPtr doc = htmlReadFd(fileno(fp), url, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_NONET);
   if (!doc) throw_error("Cannot parse file");
   return doc;
@@ -128,6 +146,9 @@ node* simplify_html(htmlNodePtr ptr, node* head)
           size_t tag_hash = insensitive_hash((char*)ptr->name);
           switch(tag_hash)
           {
+            #define TR_TAG 7609598
+            #define TD_TAG 7609584
+            #define TH_TAG 7609588
             #define TITLE_TAG 368167992
             #define P_TAG 112
             #define A_TAG 97
@@ -181,6 +202,7 @@ node* simplify_html(htmlNodePtr ptr, node* head)
                      alloc_node(seperator, NULL, head)))));
               break;
             case P_TAG:
+            case TR_TAG:
               // Just spaced out
               head = alloc_node(seperator, NULL,
                      simplify_html(ptr->last,
@@ -193,13 +215,22 @@ node* simplify_html(htmlNodePtr ptr, node* head)
             case A_TAG:
               // Hyperlink
               // <a> tags cannot be nested, which is truly a blessing
-              head = alloc_node(hyperlink, xmlGetProp(ptr, (xmlChar*)"href"), // FIXME could return NULL!
-                     simplify_html(ptr->last,
-                     alloc_node(end_hyperlink, NULL, head)));
+                head = alloc_node(hyperlink, xmlGetProp(ptr, (xmlChar*)"href"), // FIXME could return NULL!
+                       simplify_html(ptr->last,
+                       alloc_node(end_hyperlink, NULL, head)));
               break;
             case IMG_TAG:
-              head = alloc_node(image, NULL, // TODO Download image (relative urls?!)
-                     simplify_html(ptr->last, head));
+              {
+                // TODO check whether on screen
+                char* src = (char*)xmlGetProp(ptr, (xmlChar*)"src");
+                FILE* img = url_to_file(add_urls(current_url, src));
+                SDL_RWops* rw = SDL_RWFromFP(img, 0);
+                fclose(img);
+                SDL_Surface* surface = IMG_Load_RW(rw, 0);
+                if (!surface) throw_error((char*)IMG_GetError());
+                head = alloc_node(image, surface,
+                       simplify_html(ptr->last, head));
+              }
               break;
           }
         }
@@ -207,7 +238,9 @@ node* simplify_html(htmlNodePtr ptr, node* head)
       case XML_TEXT_NODE:
         {
           char* str = (char*)ptr->content;
-          if (str[strspn(str, " \r\n\t")] != '\0') // trick to remove whitespace lines.
+          for (char* ptr = str; *ptr ; ptr++) // Delete all newlines
+            if (*ptr == '\n') *ptr = ' ';
+          if (str[strspn(str, " \r\t")] != '\0') // trick to remove whitespace lines.
             head = alloc_node(text, str, head);
         }
         break;
@@ -255,6 +288,8 @@ void print_simplified_html(node* ptr)
       case end_hyperlink:
         printf("[END HYPERLINK]\n");
         break;
+      case image:
+        printf("[IMAGE %p]\n", (void*)ptr->image);
       default:;
     }
   }
@@ -262,6 +297,7 @@ void print_simplified_html(node* ptr)
 
 void render_simplified_html(node* ptr)
 {
+  bool is_seperated = false;
   for (; ptr ; ptr = ptr->next)
   {
     switch (ptr->type)
@@ -270,8 +306,15 @@ void render_simplified_html(node* ptr)
         render_text(ptr->text, renderer, current_font);
         break;
       case seperator:
-        plotter_y += 20;
-        plotter_x = 0;
+        if (!is_seperated)
+        {
+          plotter_y += TTF_FontHeight(regular_font) * 1.5;
+          plotter_x = 0;
+          SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
+          SDL_RenderDrawLine(renderer, 0, plotter_y, 640, plotter_y);
+          plotter_y += TTF_FontHeight(regular_font) * 0.5;
+          is_seperated = true;
+        }
         break;
       case make_bold:
         current_font = bold_font;
@@ -289,9 +332,28 @@ void render_simplified_html(node* ptr)
       case end_hyperlink:
         text_color = black;
         break;
+      case image:
+        {
+          plotter_y += TTF_FontHeight(current_font);
+          plotter_x = 0;
+          int image_width = ptr->image->w;
+          int image_height = ptr->image->h;
+          SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, ptr->image);
+          if (image_width > 640)
+          {
+            image_height *= (640 / image_width);
+            image_width = 640;
+          }
+          SDL_Rect rect = {0, plotter_y, image_width, image_height};
+          SDL_RenderCopy(renderer, texture, NULL, &rect);
+          SDL_DestroyTexture(texture);
+          plotter_y += ptr->image->h;
+        }
+        break;
       default:
         break;
     }
+    if (ptr->type!=seperator) is_seperated = false;
   }
 }
 
@@ -307,6 +369,7 @@ int main()
   // Init SDL2
   if (SDL_Init(SDL_INIT_EVERYTHING)) throw_error("Failed to initialise the SDL window");
   if (TTF_Init()) throw_error("Failed to initialise SDL_TTF");
+  if (IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP) == 0) throw_error("Failed to init images");
 
   SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, 0);
   renderer = SDL_CreateRenderer(window, -1, 0);
@@ -314,23 +377,23 @@ int main()
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
   italic_font  = TTF_OpenFont("iosevka-term-italic.ttf", 15);
   current_font = regular_font;
-  SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
   text_color = black;
 
-  //render_text("Did you ever hear the tragedy of Darth Plagueis The Wise? I thought not. It's not a story the Jedi would tell you. It's a Sith legend. Darth Plagueis was a Dark Lord of the Sith, so powerful and so wise he could use the Force to influence the midichlorians to create life... He had such a knowledge of the dark side that he could even keep the ones he cared about from dying. The dark side of the Force is a pathway to many abilities some consider to be unnatural. He became so powerful... the only thing he was afraid of was losing his power, which eventually, of course, he did. Unfortunately, he taught his apprentice everything he knew, then his apprentice killed him in his sleep. Ironic. He could save others from death, but not himself.", renderer, small_font);
-  //render_text("Hello, world!", renderer, large_font);
-  //render_text("Did you ever hear the tragedy of Darth Plagueis The Wise? I thought not. It's not a story the Jedi would tell you. It's a Sith legend. Darth Plagueis was a Dark Lord of the Sith, so powerful and so wise he could use the Force to influence the midichlorians to create life... He had such a knowledge of the dark side that he could even keep the ones he cared about from dying. The dark side of the Force is a pathway to many abilities some consider to be unnatural. He became so powerful... the only thing he was afraid of was losing his power, which eventually, of course, he did. Unfortunately, he taught his apprentice everything he knew, then his apprentice killed him in his sleep. Ironic. He could save others from death, but not himself.", renderer, small_font);
+  current_url     = "en.wikipedia.org/wiki/Web_browser";
 
-  char* url       = "en.wikipedia.org/wiki/Web_browser";
-  FILE* html      = url_to_file(url);
-  htmlDocPtr doc  = parse_html_file(html, url);
+new_page:;
+
+  FILE* html      = url_to_file(current_url);
+  htmlDocPtr doc  = parse_html_file(html, current_url);
   node* simple    = simplify_html(doc->last, NULL);
+  //print_simplified_html(simple);
 
   SDL_SetWindowTitle(window, window_title);
 
   SDL_Event e;
   do {
 
+    SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
     SDL_RenderClear(renderer);
     render_simplified_html(simple);
     SDL_RenderPresent(renderer);
@@ -355,8 +418,9 @@ int main()
   } while (e.type != SDL_QUIT);
 
   // Cleanup
-  TTF_CloseFont(small_font);
-  TTF_CloseFont(large_font);
+  TTF_CloseFont(regular_font);
+  TTF_CloseFont(bold_font);
+  TTF_CloseFont(italic_font);
   TTF_Quit();
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
@@ -365,6 +429,7 @@ int main()
   xmlCleanupParser();
   fclose(html);
   curl_easy_cleanup(curl_handle);
+  print_tag_hashes();
   return EXIT_SUCCESS;
 }
 

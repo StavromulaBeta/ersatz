@@ -1,6 +1,7 @@
 #pragma once
 #include <stdio.h>
 #include <libxml/HTMLparser.h>
+#include <SDL2/SDL_image.h>
 
 typedef enum { text, image, make_bold, remove_bold, make_italic, remove_italic, seperator, hyperlink, end_hyperlink } node_type;
 
@@ -10,6 +11,7 @@ typedef struct node
   union
   {
     char* text;
+    SDL_Surface* image;
     void* data;
   };
   struct node* next;
