@@ -47,6 +47,7 @@ char* add_urls(char* url1, char* url2)
   uc = curl_url_set(h, CURLUPART_URL, url1, flags);
   uc = curl_url_set(h, CURLUPART_URL, url2, flags);
   uc = curl_url_get(h, CURLUPART_URL, &ret, flags);
+  curl_url_cleanup(h);
   return ret;
 }
 
@@ -215,18 +216,25 @@ node* simplify_html(htmlNodePtr ptr, node* head)
             case A_TAG:
               // Hyperlink
               // <a> tags cannot be nested, which is truly a blessing
-                head = alloc_node(hyperlink, xmlGetProp(ptr, (xmlChar*)"href"), // FIXME could return NULL!
+              {
+                char* href = (char*)xmlGetProp(ptr, (xmlChar*)"href");
+                head = alloc_node(hyperlink, href,
                        simplify_html(ptr->last,
                        alloc_node(end_hyperlink, NULL, head)));
+              }
               break;
             case IMG_TAG:
               {
                 // TODO check whether on screen
                 char* src = (char*)xmlGetProp(ptr, (xmlChar*)"src");
-                FILE* img = url_to_file(add_urls(current_url, src));
+                char* full_url = add_urls(current_url, src);
+                FILE* img = url_to_file(full_url);
                 SDL_RWops* rw = SDL_RWFromFP(img, 0);
-                fclose(img);
                 SDL_Surface* surface = IMG_Load_RW(rw, 0);
+                fclose(img);
+                free(src);
+                free(rw);
+                free(full_url);
                 if (!surface) throw_error((char*)IMG_GetError());
                 head = alloc_node(image, surface,
                        simplify_html(ptr->last, head));
@@ -414,10 +422,12 @@ new_page:;
           scroll_offset += 15;
           break;
       }
+      SDL_FlushEvent(SDL_KEYDOWN);
     }
   } while (e.type != SDL_QUIT);
 
   // Cleanup
+  dealloc_nodes(simple);
   TTF_CloseFont(regular_font);
   TTF_CloseFont(bold_font);
   TTF_CloseFont(italic_font);
@@ -431,6 +441,17 @@ new_page:;
   curl_easy_cleanup(curl_handle);
   print_tag_hashes();
   return EXIT_SUCCESS;
+}
+
+void dealloc_nodes(node* n)
+{
+  if (n)
+  {
+    dealloc_nodes(n->next);
+    if (n->type == image) SDL_FreeSurface(n->image);
+    else free(n->data);
+    free(n);
+  }
 }
 
 __attribute__((format(printf, 1, 2))) void throw_error(char* fmt, ...)

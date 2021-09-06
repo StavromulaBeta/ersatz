@@ -18,6 +18,7 @@ typedef struct node
 } node;
 
 FILE* url_to_file(char*);
+void dealloc_nodes(node*);
 _Noreturn void throw_error(char*, ...);
 _Noreturn void handle_error_signal(int);
 void bind_error_signals();
