@@ -39,9 +39,12 @@ TTF_Font* current_font;
 hlink hyperlinks[1024];
 int num_hyperlinks = 0;
 
+int window_width = 640;
+int window_height = 480;
+
 int is_on_screen(int y1, int y2)
 {
-  return y1 > scroll_offset || y2 < scroll_offset + 480;
+  return y1 > scroll_offset || y2 < scroll_offset + window_height;
 }
 
 void add_hyperlink(char* url, int x1, int y1, int x2, int y2)
@@ -70,7 +73,6 @@ void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
-  int window_width = 640;
   size_t bytes = strlen(static_text) + 2;
   char* text = malloc(bytes); // We allocate a buffer for our own string...
   char* start = text;
@@ -135,6 +137,7 @@ static void print_tag_hashes()
 FILE* url_to_file(char* url)
 {
   // Writes data from a URL to a file.
+  printf("Downloading %s... ", url);
   FILE* out_file = tmpfile(); // Make a temporary file
   if (!out_file) throw_error("Cannot load URL %s", url);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);            // Set the URL
@@ -142,6 +145,7 @@ FILE* url_to_file(char* url)
   int err = curl_easy_perform(curl_handle);
   if (err) throw_error((char*)curl_easy_strerror(err));
   rewind(out_file);
+  puts("Done.");
   return out_file;
 }
 
@@ -328,8 +332,8 @@ void render_simplified_html(node* ptr)
   for (; ptr ; ptr = ptr->next)
   {
     _Bool render = false;
-    if (plotter_y > -480) render = true;
-    if (plotter_y > 480) return;
+    if (plotter_y > -window_height) render = true;
+    if (plotter_y > window_height) return;
     switch (ptr->type)
     {
       case text:
@@ -343,7 +347,7 @@ void render_simplified_html(node* ptr)
           if (render)
           {
             SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
-            SDL_RenderDrawLine(renderer, 0, plotter_y, 640, plotter_y);
+            SDL_RenderDrawLine(renderer, 0, plotter_y, window_width, plotter_y);
           }
           plotter_y += TTF_FontHeight(regular_font) * 0.5;
           is_seperated = true;
@@ -383,10 +387,10 @@ void render_simplified_html(node* ptr)
           if (render)
           {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, ptr->image);
-            if (image_width > 640)
+            if (image_width > window_width)
             {
-              image_height *= (640 / image_width);
-              image_width = 640;
+              image_height *= (window_width / image_width);
+              image_width = window_width;
             }
             SDL_Rect rect = {0, plotter_y, image_width, image_height};
             SDL_RenderCopy(renderer, texture, NULL, &rect);
@@ -416,7 +420,7 @@ int main()
   if (TTF_Init()) throw_error("Failed to initialise SDL_TTF");
   if (IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP) == 0) throw_error("Failed to init images");
 
-  SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, 0);
+  SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
   regular_font = TTF_OpenFont("iosevka-term-regular.ttf", 15);
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
@@ -424,18 +428,13 @@ int main()
   current_font = regular_font;
   text_color = black;
 
-  //current_url = "en.wikipedia.org/wiki/Web_browser";
-  current_url = "news.ycombinator.com";
+  current_url = "en.wikipedia.org/wiki/Web_browser";
 
 new_page:;
 
-  printf("Downloading %s...\n", current_url);
   FILE* html      = url_to_file(current_url);
-  printf("Parsing html...\n");
   htmlDocPtr doc  = parse_html_file(html, current_url);
-  printf("Simplifying AST...\n");
   node* simple    = simplify_html(doc->last, NULL);
-  printf("Done.\n");
   //print_simplified_html(simple);
 
   xmlCleanupParser();
@@ -491,6 +490,14 @@ new_page:;
             }
           }
         }
+        break;
+      case SDL_WINDOWEVENT:
+        if (e.window.event == SDL_WINDOWEVENT_RESIZED || e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+        {
+          window_width = e.window.data1;
+          window_height = e.window.data2;
+        }
+        break;
     }
   } while (e.type != SDL_QUIT);
 
@@ -505,7 +512,7 @@ new_page:;
   SDL_DestroyWindow(window);
   SDL_Quit();
   curl_easy_cleanup(curl_handle);
-  print_tag_hashes();
+  //print_tag_hashes();
   return EXIT_SUCCESS;
 }
 
