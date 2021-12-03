@@ -16,12 +16,27 @@
 #include "SDL_render.h"
 #include "main.h"
 
+SDL_Rect bar;
+SDL_Rect back;
+SDL_Rect url;
+SDL_Rect backtext;
+
+#define BAR_HEIGHT 50
+
+typedef struct _url_list
+{
+  char* full_url;
+  struct _url_list *next;
+} url_list;
+
+url_list* history;
+
 char* current_url = NULL;
 
 CURL* curl_handle;
 char* window_title = "";
 
-int plotter_x = 0, plotter_y = 0;
+int plotter_x = 20, plotter_y = BAR_HEIGHT;
 int scroll_offset = 0;
 
 SDL_Renderer* renderer;
@@ -29,9 +44,11 @@ SDL_Renderer* renderer;
 SDL_Color black = {0, 0, 0, 255};
 SDL_Color blue  = {0, 0, 255, 255};
 SDL_Color gray  = {128, 128, 128, 255};
+SDL_Color other_gray = {96, 96, 96, 255};
 SDL_Color text_color;
 
 TTF_Font* regular_font;
+TTF_Font* menu_font;
 TTF_Font* bold_font;
 TTF_Font* italic_font;
 TTF_Font* current_font;
@@ -85,7 +102,7 @@ void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool
   bool first_iteration = true;
   do {
     more_lines = false;
-    int wrap_chars = (window_width - plotter_x) / char_width; // Calculate how many pixels we have to work with
+    int wrap_chars = (window_width - plotter_x - 20) / char_width; // Calculate how many pixels we have to work with
     int len = 0;
     for (; text[len]; ++len) // Iterate over the string until we find place for a linebreak
     {
@@ -106,6 +123,7 @@ linebreak:
     linebreak_pos -= first_iteration;
     if (render)
     {
+
       SDL_Surface* surface = TTF_RenderText_Blended(font, text, text_color); // Render our line - only up to the null byte
       SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
       SDL_Rect rect = {plotter_x, plotter_y, char_width * len, char_height};
@@ -116,7 +134,7 @@ linebreak:
     if (more_lines) // Update the plotter variables...
     {
       plotter_y += char_height; // ...for the next iteration...
-      plotter_x = 0;
+      plotter_x = 20;
       text += linebreak_pos + 1;
     }
     else plotter_x += char_width * len; // ...or not
@@ -257,9 +275,10 @@ node* simplify_html(htmlNodePtr ptr, node* head)
                 free(src);
                 free(rw);
                 free(full_url);
-                if (!surface) throw_error((char*)IMG_GetError());
-                head = alloc_node(image, surface,
-                       simplify_html(ptr->last, head));
+                if (!surface) head = simplify_html(ptr->last, head);
+                else
+                  head = alloc_node(image, surface,
+                          simplify_html(ptr->last, head));
               }
               break;
           }
@@ -343,11 +362,11 @@ void render_simplified_html(node* ptr)
         if (!is_seperated)
         {
           plotter_y += TTF_FontHeight(regular_font) * 1.5;
-          plotter_x = 0;
+          plotter_x = 20;
           if (render)
           {
             SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
-            SDL_RenderDrawLine(renderer, 0, plotter_y, window_width, plotter_y);
+            SDL_RenderDrawLine(renderer, 10, plotter_y, window_width - 20, plotter_y);
           }
           plotter_y += TTF_FontHeight(regular_font) * 0.5;
           is_seperated = true;
@@ -372,16 +391,22 @@ void render_simplified_html(node* ptr)
       case end_hyperlink:
         if (render)
         {
+          int h = TTF_FontHeight(current_font);
           x2 = plotter_x;
-          y2 = plotter_y + TTF_FontHeight(current_font);
-          add_hyperlink(url, x1, y1, x2, y2);
+          y2 = y1 + h;
+          if (plotter_y > y1)
+          {
+            add_hyperlink(url, x1, y1, window_width - 10, y2);
+            add_hyperlink(url, 10, plotter_y, x2, plotter_y + h);
+          }
+          else add_hyperlink(url, x1, y1, x2, y2);
         }
         text_color = black;
         break;
       case image:
         {
           plotter_y += TTF_FontHeight(current_font);
-          plotter_x = 0;
+          plotter_x = 20;
           int image_width = ptr->image->w;
           int image_height = ptr->image->h;
           if (render)
@@ -392,7 +417,7 @@ void render_simplified_html(node* ptr)
               image_height *= (window_width / image_width);
               image_width = window_width;
             }
-            SDL_Rect rect = {0, plotter_y, image_width, image_height};
+            SDL_Rect rect = {plotter_x, plotter_y, image_width, image_height};
             SDL_RenderCopy(renderer, texture, NULL, &rect);
             SDL_DestroyTexture(texture);
           }
@@ -406,7 +431,7 @@ void render_simplified_html(node* ptr)
   }
 }
 
-int main()
+int main(int argc, char** argv)
 {
   bind_error_signals();
   // Init libcURL
@@ -423,12 +448,14 @@ int main()
   SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
   regular_font = TTF_OpenFont("iosevka-term-regular.ttf", 15);
+  menu_font    = TTF_OpenFont("iosevka-term-regular.ttf", 25);
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
   italic_font  = TTF_OpenFont("iosevka-term-italic.ttf", 15);
   current_font = regular_font;
   text_color = black;
 
-  current_url = "en.wikipedia.org/wiki/Web_browser";
+  if (argc) current_url = argv[1];
+  else current_url = "en.wikipedia.org/wiki/Web_browser";
 
 new_page:;
 
@@ -444,16 +471,22 @@ new_page:;
 
   SDL_SetWindowTitle(window, window_title);
 
+  url_list* l = malloc(sizeof *l);
+  l->full_url = strdup(current_url);
+  l->next = history;
+  history = l;
+
   SDL_Event e;
   do {
     num_hyperlinks = 0;
     SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
     SDL_RenderClear(renderer);
     render_simplified_html(simple);
+    draw_bar();
     SDL_RenderPresent(renderer);
 
-    plotter_x = 0;
-    plotter_y = scroll_offset;
+    plotter_x = 20;
+    plotter_y = scroll_offset + BAR_HEIGHT;
 
     SDL_PollEvent(&e);
     //printf("Recieved event %i\n", e.type);
@@ -468,6 +501,20 @@ new_page:;
           case SDLK_PAGEUP:
             scroll_offset += 10;
             break;
+          case SDLK_BACKSPACE:
+go_back:
+            if (history->next)
+            {
+              current_url = history->next->full_url;
+              url_list* n = history->next->next;
+              free(history->full_url);
+              free(history->next);
+              free(history);
+              history = n;
+              dealloc_nodes(simple);
+              xmlFreeDoc(doc);
+              goto new_page;
+            }
         }
         //printf("Scroll is %i\n", scroll_offset);
         //SDL_FlushEvent(SDL_KEYDOWN);
@@ -477,6 +524,8 @@ new_page:;
         {
           int x = e.button.x;
           int y = e.button.y;
+          if (back.x < x && back.x + back.w > x && back.y < y && back.y + back.h > y)
+            goto go_back;
           for (int i = 0; i < num_hyperlinks; ++i)
           {
             hlink h = hyperlinks[i];
@@ -560,4 +609,26 @@ unsigned int insensitive_hash(const char *str)
   while ((c = tolower(*str++)))
     hash = c + ((long)hash << 6) + ((long)hash << 16) - hash;
   return hash;
+}
+
+void draw_bar()
+{
+  bar = (SDL_Rect)  {.x = 0, .y = 0, .w = window_width, .h = BAR_HEIGHT};
+  back = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20};
+  url = (SDL_Rect)  {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20};
+  static int char_width = 0;
+  static int char_height = 0;
+  if (!char_width) TTF_SizeUTF8(menu_font, " back ", &char_width, &char_height);
+  backtext = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = char_width, .h = char_height};
+  SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
+  SDL_RenderFillRect(renderer, &bar);
+  SDL_SetRenderDrawColor(renderer, 192, 192, 192, 255);
+  SDL_RenderDrawRect(renderer, &bar);
+  SDL_RenderDrawRect(renderer, &back);
+  SDL_RenderDrawRect(renderer, &url);
+  static SDL_Surface* surface = NULL;
+  static SDL_Texture* texture = NULL;
+  if (!surface) surface = TTF_RenderText_Blended(menu_font, " back ", black); // Render our line - only up to the null byte
+  if (!texture) texture = SDL_CreateTextureFromSurface(renderer, surface);
+  SDL_RenderCopy(renderer, texture, NULL, &backtext);
 }

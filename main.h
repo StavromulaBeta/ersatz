@@ -28,6 +28,7 @@ typedef struct _hlink
   char* url;
 } hlink;
 
+void draw_bar();
 FILE* url_to_file(char*);
 void dealloc_nodes(node*);
 _Noreturn void throw_error(char*, ...);
