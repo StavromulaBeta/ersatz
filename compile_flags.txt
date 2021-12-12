@@ -1,0 +1,15 @@
+-Wall
+-Wextra
+-Werror
+-Wno-unused
+-pedantic-errors
+-lSDL2
+-I/usr/include/SDL2
+-D_REENTRANT
+-lcurl
+-I/usr/local/include/libxml2
+-L/usr/local/lib
+-lxml2
+-lz
+-lm
+-ldl
