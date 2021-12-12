@@ -3,10 +3,10 @@ DEBUGFLAGS := `sdl2-config --libs --cflags` `curl-config --libs --cflags` `xml2-
 OPTFLAGS := `sdl2-config --libs --cflags` `curl-config --libs --cflags` `xml2-config --libs --cflags` -Ofast -l:libSDL2_ttf.so -l:libSDL2_image.so
 
 build: main.c
-	$(CC) main.c gc.c -o main $(DEBUGFLAGS)
+	$(CC) main.c -o main $(DEBUGFLAGS)
 
 clean:
 	rm -f main
 
 optimised: main.c
-	$(CC) main.c gc.c -o main $(OPTFLAGS)
+	$(CC) main.c -o main $(OPTFLAGS)

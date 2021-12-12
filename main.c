@@ -20,6 +20,7 @@ SDL_Rect bar;
 SDL_Rect back;
 SDL_Rect url;
 SDL_Rect backtext;
+SDL_Rect urltext;
 
 #define BAR_HEIGHT 50
 
@@ -28,6 +29,8 @@ typedef struct _url_list
   char* full_url;
   struct _url_list *next;
 } url_list;
+
+_Bool should_rerender_bar = 1;
 
 url_list* history;
 
@@ -409,14 +412,15 @@ void render_simplified_html(node* ptr)
           plotter_x = 20;
           int image_width = ptr->image->w;
           int image_height = ptr->image->h;
+          if (image_width > (window_width - 40))
+          {
+            image_height *= (window_width - 40);
+            image_height /= image_width;
+            image_width = window_width - 40;
+          }
           if (render)
           {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, ptr->image);
-            if (image_width > window_width)
-            {
-              image_height *= (window_width / image_width);
-              image_width = window_width;
-            }
             SDL_Rect rect = {plotter_x, plotter_y, image_width, image_height};
             SDL_RenderCopy(renderer, texture, NULL, &rect);
             SDL_DestroyTexture(texture);
@@ -437,7 +441,7 @@ int main(int argc, char** argv)
   // Init libcURL
   curl_global_init(CURL_GLOBAL_ALL);
   curl_handle = curl_easy_init();
-  curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:15.0) Gecko/20100101 Firefox/15.0.1");
+  curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Ersatz/0.0.1");
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);     // Disable the progress bar
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
   // Init SDL2
@@ -448,17 +452,15 @@ int main(int argc, char** argv)
   SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
   regular_font = TTF_OpenFont("iosevka-term-regular.ttf", 15);
-  menu_font    = TTF_OpenFont("iosevka-term-regular.ttf", 25);
+  menu_font    = TTF_OpenFont("iosevka-term-regular.ttf", 22);
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
   italic_font  = TTF_OpenFont("iosevka-term-italic.ttf", 15);
   current_font = regular_font;
   text_color = black;
 
-  if (argc) current_url = argv[1];
-  else current_url = "en.wikipedia.org/wiki/Web_browser";
-
+enter_url:
+  current_url = text_input("Enter a URL:");
 new_page:;
-
   FILE* html      = url_to_file(current_url);
   htmlDocPtr doc  = parse_html_file(html, current_url);
   node* simple    = simplify_html(doc->last, NULL);
@@ -475,6 +477,8 @@ new_page:;
   l->full_url = strdup(current_url);
   l->next = history;
   history = l;
+
+  should_rerender_bar = 1;
 
   SDL_Event e;
   do {
@@ -526,6 +530,12 @@ go_back:
           int y = e.button.y;
           if (back.x < x && back.x + back.w > x && back.y < y && back.y + back.h > y)
             goto go_back;
+          if (url.x < x && url.x + url.w > x && url.y < y && url.y + url.h > y)
+          {
+            dealloc_nodes(simple);
+            xmlFreeDoc(doc);
+            goto enter_url;
+          }
           for (int i = 0; i < num_hyperlinks; ++i)
           {
             hlink h = hyperlinks[i];
@@ -545,6 +555,7 @@ go_back:
         {
           window_width = e.window.data1;
           window_height = e.window.data2;
+          should_rerender_bar = 1;
         }
         break;
     }
@@ -613,22 +624,93 @@ unsigned int insensitive_hash(const char *str)
 
 void draw_bar()
 {
-  bar = (SDL_Rect)  {.x = 0, .y = 0, .w = window_width, .h = BAR_HEIGHT};
-  back = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20};
-  url = (SDL_Rect)  {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20};
-  static int char_width = 0;
-  static int char_height = 0;
-  if (!char_width) TTF_SizeUTF8(menu_font, " back ", &char_width, &char_height);
-  backtext = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = char_width, .h = char_height};
+  static int url_width;
+  static SDL_Texture* t1 = NULL;
+  static SDL_Texture* t2 = NULL;
+  if (should_rerender_bar)
+  {
+    should_rerender_bar = false;
+    int back_text_width;
+    int text_height;
+    TTF_SizeUTF8(menu_font, " back ", &back_text_width, &text_height);
+    TTF_SizeUTF8(menu_font, current_url, &url_width, &text_height);
+    bar = (SDL_Rect)  {.x = 0, .y = 0, .w = window_width, .h = BAR_HEIGHT};
+    back = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20};
+    url = (SDL_Rect)  {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20};
+    backtext = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = back_text_width, .h = text_height};
+    if (url_width > window_width - 120) url_width = window_width - 120;
+    urltext = (SDL_Rect) {.x = 15, .y = 10, .w = url_width, .h = text_height};
+    SDL_DestroyTexture(t1);
+    SDL_DestroyTexture(t2);
+    SDL_Surface* s1;
+    SDL_Surface* s2;
+    s1 = TTF_RenderText_Blended(menu_font, " back ", black);
+    t1 = SDL_CreateTextureFromSurface(renderer, s1);
+    s2 = TTF_RenderText_Blended(menu_font, current_url, black);
+    t2 = SDL_CreateTextureFromSurface(renderer, s2);
+    SDL_FreeSurface(s1);
+    SDL_FreeSurface(s2);
+  }
   SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
   SDL_RenderFillRect(renderer, &bar);
   SDL_SetRenderDrawColor(renderer, 192, 192, 192, 255);
   SDL_RenderDrawRect(renderer, &bar);
   SDL_RenderDrawRect(renderer, &back);
   SDL_RenderDrawRect(renderer, &url);
-  static SDL_Surface* surface = NULL;
-  static SDL_Texture* texture = NULL;
-  if (!surface) surface = TTF_RenderText_Blended(menu_font, " back ", black); // Render our line - only up to the null byte
-  if (!texture) texture = SDL_CreateTextureFromSurface(renderer, surface);
-  SDL_RenderCopy(renderer, texture, NULL, &backtext);
+  SDL_RenderCopy(renderer, t1, NULL, &backtext);
+  SDL_RenderCopy(renderer, t2, NULL, &urltext);
+}
+
+char* text_input(char* prompt)
+{
+  SDL_Window* input_window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 60, 0);
+  SDL_Renderer* input_renderer = SDL_CreateRenderer(input_window, -1, SDL_RENDERER_PRESENTVSYNC);
+  int prompt_width;
+  int prompt_height;
+  TTF_SizeUTF8(regular_font, prompt, &prompt_width, &prompt_height);
+  SDL_Rect prompt_rect = (SDL_Rect) {.x = 10, .y = 10, .w = prompt_width, .h = prompt_height};
+  SDL_Surface* prompt_surface = TTF_RenderText_Blended(regular_font, prompt, black);
+  SDL_Texture* prompt_texture = SDL_CreateTextureFromSurface(input_renderer, prompt_surface);
+  SDL_SetTextInputRect(&prompt_rect);
+  SDL_StartTextInput();
+  SDL_Event e;
+  char text[1024] ="\0";
+  int len = 0;
+  for (;;)
+  {
+    int input_width;
+    int input_height;
+    TTF_SizeUTF8(regular_font, text, &input_width, &input_height);
+    SDL_Rect input_rect = (SDL_Rect) {.x = 10, .y = 10 + prompt_height, .w = input_width, .h = input_height};
+    SDL_SetRenderDrawColor(input_renderer, 242, 233, 234, 255);
+    SDL_RenderClear(input_renderer);
+    SDL_Surface* input_surface = TTF_RenderText_Blended(regular_font, text, black);
+    SDL_Texture* input_texture = SDL_CreateTextureFromSurface(input_renderer, input_surface);
+    SDL_RenderCopy(input_renderer, prompt_texture, NULL, &prompt_rect);
+    SDL_RenderCopy(input_renderer, input_texture, NULL, &input_rect);
+    SDL_RenderPresent(input_renderer);
+    SDL_DestroyTexture(input_texture);
+    SDL_FreeSurface(input_surface);
+    SDL_WaitEvent(&e);
+    switch (e.type)
+    {
+      case SDL_TEXTINPUT:
+      {
+        if (len >= 1022) continue;
+        text[len++] = e.text.text[0];
+        text[len] = '\0';
+        break;
+      }
+      case SDL_KEYDOWN:
+      if (e.key.keysym.sym == SDLK_RETURN)
+      {
+        SDL_FreeSurface(prompt_surface);
+        SDL_DestroyTexture(prompt_texture);
+        SDL_DestroyWindow(input_window);
+        SDL_DestroyRenderer(input_renderer);
+        return strdup(text);
+      }
+      if (e.key.keysym.sym == SDLK_BACKSPACE && len) text[--len] = '\0';
+    }
+  }
 }
