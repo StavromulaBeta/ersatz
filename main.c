@@ -56,11 +56,13 @@ TTF_Font* bold_font;
 TTF_Font* italic_font;
 TTF_Font* current_font;
 
-hlink hyperlinks[1024];
+hlink hyperlinks[NUM_HYPERLINKS]; // Why isn't this a linked list!
 int num_hyperlinks = 0;
 
 int window_width = 640;
 int window_height = 480;
+
+form_list* forms;
 
 int is_on_screen(int y1, int y2)
 {
@@ -148,7 +150,7 @@ linebreak:
 
 static void print_tag_hashes()
 {
-  char* arr[] = {"TR", "TD", "TH", "TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG"};
+  char* arr[] = {"TR", "TD", "TH", "TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG", "FORM", "INPUT"};
   for (size_t i = 0; i < sizeof(arr) / sizeof(arr[0]); ++i)
   {
     printf("#define %s_TAG %u\n", arr[i], insensitive_hash(arr[i]));
@@ -181,6 +183,8 @@ htmlDocPtr parse_html_file(FILE* fp, char* url)
 node* simplify_html(htmlNodePtr ptr, node* head)
 {
   // ptr is the LAST node, and we iterate BACKWARDS, so our linked list is forwards
+  static char* form_action;
+  static method_t form_method;
   for (; ptr ; ptr = ptr->prev)
   {
     switch (ptr->type)
@@ -209,6 +213,8 @@ node* simplify_html(htmlNodePtr ptr, node* head)
 #define H5_TAG 6822349
 #define H6_TAG 6822350
 #define IMG_TAG 874608419
+#define FORM_TAG 3234988420
+#define INPUT_TAG 293375786
             case TITLE_TAG:
               window_title = (char*)ptr->children->content;
             case SCRIPT_TAG:
@@ -270,6 +276,7 @@ node* simplify_html(htmlNodePtr ptr, node* head)
               {
                 // TODO check whether on screen
                 char* src = (char*)xmlGetProp(ptr, (xmlChar*)"src");
+                if (!src) goto err;
                 char* full_url = add_urls(current_url, src);
                 FILE* img = url_to_file(full_url);
                 SDL_RWops* rw = SDL_RWFromFP(img, 0);
@@ -278,12 +285,34 @@ node* simplify_html(htmlNodePtr ptr, node* head)
                 free(src);
                 free(rw);
                 free(full_url);
-                if (!surface) head = simplify_html(ptr->last, head);
-                else
-                  head = alloc_node(image, surface,
-                          simplify_html(ptr->last, head));
+                if (!surface) goto err;
+                head = alloc_node(image, surface,
+                       simplify_html(ptr->last, head));
               }
               break;
+            case FORM_TAG:
+            {
+              form_action = (char*)xmlGetProp(ptr, (xmlChar*)"action");
+              char* met = (char*)xmlGetProp(ptr, (xmlChar*)"method");
+              form_method = !met || met[0] == 'g' ? get : post;
+              head = simplify_html(ptr->last, head);
+            }
+            break;
+            case INPUT_TAG:
+            {
+              char* name = (char*)xmlGetProp(ptr, (xmlChar*)"name");
+              char* type = (char*)xmlGetProp(ptr, (xmlChar*)"type");
+              //printf("TYPE = %s\n", type);
+              if (type && strcmp(type, "text") && strcmp(type, "search")) goto err;
+              // Assume type is text because nobody actually uses checkboxes.
+              form* f = malloc(sizeof *f);
+              f->action = form_action;
+              f->name = name;
+              f->method = form_method;
+              head = alloc_node(input, f,
+                  simplify_html(ptr->last, head));
+            }
+            break;
           }
         }
         break;
@@ -296,7 +325,7 @@ node* simplify_html(htmlNodePtr ptr, node* head)
             head = alloc_node(text, str, head);
         }
         break;
-      default:;
+      default: err: head = simplify_html(ptr->last, head); break;
     }
   }
   return head;
@@ -428,6 +457,27 @@ void render_simplified_html(node* ptr)
           plotter_y += image_height;
         }
         break;
+      case input:
+      {
+        int height = TTF_FontHeight(regular_font);
+        form* f = ptr->form;
+        form_list* fl = malloc(sizeof *fl);
+        plotter_y += height;
+        fl->form = f;
+        fl->next = forms;
+        fl->x1 = 0;
+        fl->y1 = plotter_y;
+        plotter_y += height * 2;
+        plotter_x = 0;
+        fl->y2 = plotter_y;
+        fl->x2 = window_width;
+        plotter_y += height;
+        forms = fl;
+        SDL_Rect r = (SDL_Rect) {.x = fl->x1 + 10, .y = fl->y1 + height/2, .w=window_width - 20, .h=height};
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderDrawRect(renderer, &r);
+      }
+      break;
       default:
         break;
     }
@@ -458,10 +508,18 @@ int main(int argc, char** argv)
   current_font = regular_font;
   text_color = black;
 
-enter_url:
-  current_url = text_input("Enter a URL:");
+  if (argc > 1) current_url = argv[1];
+  else
+    enter_url: current_url = text_input("Enter a URL:");
+
 new_page:;
-  FILE* html      = url_to_file(current_url);
+  forms = NULL;
+
+  FILE* html = url_to_file(current_url);
+
+  curl_easy_getinfo(curl_handle, CURLINFO_EFFECTIVE_URL, &current_url);
+  current_url = strdup(current_url);
+
   htmlDocPtr doc  = parse_html_file(html, current_url);
   node* simple    = simplify_html(doc->last, NULL);
   //print_simplified_html(simple);
@@ -535,6 +593,34 @@ go_back:
             dealloc_nodes(simple);
             xmlFreeDoc(doc);
             goto enter_url;
+          }
+          for (form_list* l = forms; l; l = l->next)
+          {
+            if (l->x1 < x && l->x2 > x && l->y1 < y && l->y2 > y)
+            {
+              // Time to make a request.
+              static char buf[1024] = "";
+              form* f = l->form;
+              char* url = add_urls(current_url, f->action);
+              char* inp = text_input(url);
+              char* inp_esc = curl_easy_escape(curl_handle, inp, strlen(inp));
+              if (f->method == post)
+              {
+                sprintf(buf, "%s=%s", f->name, inp_esc);
+                curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, buf);
+              }
+              else
+              {
+                sprintf(buf, "%s?%s=%s", url, f->name, inp_esc);
+                url = buf;
+              }
+              current_url = url;
+              free(inp);
+              curl_free(inp_esc);
+              dealloc_nodes(simple);
+              xmlFreeDoc(doc);
+              goto new_page;
+            }
           }
           for (int i = 0; i < num_hyperlinks; ++i)
           {

@@ -5,7 +5,38 @@
 
 #define NUM_HYPERLINKS 1024
 
-typedef enum { text, image, make_bold, remove_bold, make_italic, remove_italic, seperator, hyperlink, end_hyperlink } node_type;
+typedef enum { get, post } method_t;
+
+typedef struct _form
+{
+  char* name;
+  char* action;
+  method_t method;
+} form;
+
+typedef struct _form_list
+{
+  form* form;
+  struct _form_list* next;
+  int x1;
+  int y1;
+  int x2;
+  int y2;
+} form_list;
+
+typedef enum
+{
+  text,
+  image,
+  make_bold,
+  remove_bold,
+  make_italic,
+  remove_italic,
+  seperator,
+  hyperlink,
+  end_hyperlink,
+  input,
+} node_type;
 
 typedef struct _node
 {
@@ -14,6 +45,7 @@ typedef struct _node
   {
     char* text;
     SDL_Surface* image;
+    form* form;
     void* data;
   };
   struct _node* next;
