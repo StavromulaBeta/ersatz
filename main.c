@@ -95,6 +95,7 @@ void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
+  const int margin_width = window_width / 8;
   size_t bytes = strlen(static_text) + 2;
   char* text = malloc(bytes); // We allocate a buffer for our own string...
   char* start = text;
@@ -107,7 +108,7 @@ void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool
   bool first_iteration = true;
   do {
     more_lines = false;
-    int wrap_chars = (window_width - plotter_x - 20) / char_width; // Calculate how many pixels we have to work with
+    int wrap_chars = (window_width - plotter_x - margin_width) / char_width; // Calculate how many pixels we have to work with
     int len = 0;
     for (; text[len]; ++len) // Iterate over the string until we find place for a linebreak
     {
@@ -139,7 +140,7 @@ linebreak:
     if (more_lines) // Update the plotter variables...
     {
       plotter_y += char_height; // ...for the next iteration...
-      plotter_x = 20;
+      plotter_x = margin_width;
       text += linebreak_pos + 1;
     }
     else plotter_x += char_width * len; // ...or not
@@ -380,6 +381,7 @@ void render_simplified_html(node* ptr)
 {
   bool is_seperated = false;
   int x1, y1, x2, y2; char* url; // hyperlink stuff
+  const int margin_width = window_width / 8;
   for (; ptr ; ptr = ptr->next)
   {
     _Bool render = false;
@@ -393,14 +395,14 @@ void render_simplified_html(node* ptr)
       case seperator:
         if (!is_seperated)
         {
-          plotter_y += TTF_FontHeight(regular_font) * 1.5;
-          plotter_x = 20;
+          plotter_y += TTF_FontHeight(regular_font) * 2;
+          plotter_x = margin_width;
           if (render)
           {
             SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
-            SDL_RenderDrawLine(renderer, 10, plotter_y, window_width - 20, plotter_y);
+            SDL_RenderDrawLine(renderer, margin_width/2, plotter_y, window_width - margin_width/2, plotter_y);
           }
-          plotter_y += TTF_FontHeight(regular_font) * 0.5;
+          plotter_y += TTF_FontHeight(regular_font);
           is_seperated = true;
         }
         break;
@@ -428,8 +430,8 @@ void render_simplified_html(node* ptr)
           y2 = y1 + h;
           if (plotter_y > y1)
           {
-            add_hyperlink(url, x1, y1, window_width - 10, y2);
-            add_hyperlink(url, 10, plotter_y, x2, plotter_y + h);
+            add_hyperlink(url, x1, y1, window_width - margin_width, y2);
+            add_hyperlink(url, margin_width, plotter_y, x2, plotter_y + h);
           }
           else add_hyperlink(url, x1, y1, x2, y2);
         }
@@ -438,14 +440,14 @@ void render_simplified_html(node* ptr)
       case image:
         {
           plotter_y += TTF_FontHeight(current_font);
-          plotter_x = 20;
+          plotter_x = margin_width;
           int image_width = ptr->image->w;
           int image_height = ptr->image->h;
-          if (image_width > (window_width - 40))
+          if (image_width > (window_width - margin_width*2))
           {
-            image_height *= (window_width - 40);
+            image_height *= (window_width - margin_width*2);
             image_height /= image_width;
-            image_width = window_width - 40;
+            image_width = window_width - margin_width*2;
           }
           if (render)
           {
@@ -473,7 +475,7 @@ void render_simplified_html(node* ptr)
         fl->x2 = window_width;
         plotter_y += height;
         forms = fl;
-        SDL_Rect r = (SDL_Rect) {.x = fl->x1 + 10, .y = fl->y1 + height/2, .w=window_width - 20, .h=height};
+        SDL_Rect r = (SDL_Rect) {.x = fl->x1 + margin_width, .y = fl->y1 + height/2, .w=window_width - margin_width, .h=height};
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderDrawRect(renderer, &r);
       }
