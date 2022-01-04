@@ -14,70 +14,138 @@
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
-#include "main.h"
 
-SDL_Rect bar;
-SDL_Rect back;
-SDL_Rect url;
-SDL_Rect backtext;
-SDL_Rect urltext;
-
+#define NUM_HYPERLINKS 1024
 #define BAR_HEIGHT 50
+
+typedef enum { get, post } method_t;
+
+typedef struct _form
+{
+  const char* name;
+  const char* action;
+  method_t method;
+} form;
+
+typedef struct _form_list
+{
+  const struct _form_list* next;
+  const form* form;
+  SDL_Rect box;
+} form_list;
+
+typedef enum
+{
+  text,
+  image,
+  make_bold,
+  remove_bold,
+  make_italic,
+  remove_italic,
+  seperator,
+  hyperlink,
+  end_hyperlink,
+  input,
+} node_type;
+
+typedef struct _node
+{
+  const struct _node* next;
+  node_type type;
+  union
+  {
+    const char* text;
+    SDL_Surface* image;
+    const form* form;
+    const void* data;
+  };
+} node;
+
+typedef struct _hlink
+{
+  SDL_Rect box;
+  const char* url;
+} hlink;
 
 typedef struct _url_list
 {
+  const struct _url_list *next;
   char* full_url;
-  struct _url_list *next;
 } url_list;
 
-_Bool should_rerender_bar = 1;
+static const char* text_input(const char*);
+static void draw_bar(void);
+static FILE* url_to_file(const char*);
+static void dealloc_nodes(const node*);
+static _Noreturn void throw_error(const char*, ...);
+static _Noreturn void handle_error_signal(int);
+static void bind_error_signals(void);
+static const node* simplify_html(htmlNodePtr, const node*);
+static unsigned insensitive_hash(const char*);
+static const node* alloc_node(node_type, const void*, const node*);
+static void print_simplified_html(const node*);
+static void render_simplified_html(const node*);
 
-url_list* history;
+static SDL_Rect bar;
+static SDL_Rect back;
+static SDL_Rect url;
+static SDL_Rect backtext;
+static SDL_Rect urltext;
 
-char* current_url = NULL;
 
-CURL* curl_handle;
-char* window_title = "";
+static _Bool should_rerender_bar = 1;
 
-int plotter_x = 20, plotter_y = BAR_HEIGHT;
-int scroll_offset = 0;
+static const url_list* history;
 
-SDL_Renderer* renderer;
+static const char* current_url = NULL;
 
-SDL_Color black = {0, 0, 0, 255};
-SDL_Color blue  = {0, 0, 255, 255};
-SDL_Color gray  = {128, 128, 128, 255};
-SDL_Color other_gray = {96, 96, 96, 255};
-SDL_Color text_color;
+static CURL* curl_handle;
+static const char* window_title = "";
 
-TTF_Font* regular_font;
-TTF_Font* menu_font;
-TTF_Font* bold_font;
-TTF_Font* italic_font;
-TTF_Font* current_font;
+static int plotter_x = 20, plotter_y = BAR_HEIGHT;
+static int scroll_offset = 0;
 
-hlink hyperlinks[NUM_HYPERLINKS]; // Why isn't this a linked list!
-int num_hyperlinks = 0;
+static SDL_Renderer* renderer;
 
-int window_width = 640;
-int window_height = 480;
+static const SDL_Color black = {0, 0, 0, 255};
+static const SDL_Color blue  = {0, 0, 255, 255};
+static const SDL_Color gray  = {128, 128, 128, 255};
+static const SDL_Color other_gray = {96, 96, 96, 255};
+static SDL_Color text_color;
 
-form_list* forms;
+static TTF_Font* regular_font;
+static TTF_Font* menu_font;
+static TTF_Font* bold_font;
+static TTF_Font* italic_font;
+static TTF_Font* current_font;
 
-int is_on_screen(int y1, int y2)
+static hlink hyperlinks[NUM_HYPERLINKS]; // Why isn't this a linked list!
+static int num_hyperlinks = 0;
+
+static int window_width = 640;
+static int window_height = 480;
+
+static const form_list* forms;
+
+static _Bool does_intersect_rect(int x, int y, SDL_Rect r)
+{
+  return (x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h);
+}
+
+static int is_on_screen(int y1, int y2)
 {
   return y1 > scroll_offset || y2 < scroll_offset + window_height;
 }
 
-void add_hyperlink(char* url, int x1, int y1, int x2, int y2)
+static void add_hyperlink(const char* url, int x, int y, int w, int h)
 {
   if (num_hyperlinks < NUM_HYPERLINKS)
   {
-    hyperlinks[num_hyperlinks++] = (hlink) {.url=url, .x1=x1, .y1=y1, .x2=x2, .y2=y2};
+    hyperlinks[num_hyperlinks++] = (hlink) {.url=url, .box=(SDL_Rect){.x=x,.y=y,.w=w,.h=h}};
   }
 }
 
-char* add_urls(char* url1, char* url2)
+static char* add_urls(const char* url1, const char* url2)
 {
   char* ret;
   CURLU *h;
@@ -91,7 +159,7 @@ char* add_urls(char* url1, char* url2)
   return ret;
 }
 
-void render_text(char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool render)
+static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool render)
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
@@ -149,7 +217,7 @@ linebreak:
   free(start);
 }
 
-static void print_tag_hashes()
+static void print_tag_hashes(void)
 {
   char* arr[] = {"TR", "TD", "TH", "TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG", "FORM", "INPUT"};
   for (size_t i = 0; i < sizeof(arr) / sizeof(arr[0]); ++i)
@@ -158,7 +226,7 @@ static void print_tag_hashes()
   }
 }
 
-FILE* url_to_file(char* url)
+static FILE* url_to_file(const char* url)
 {
   // Writes data from a URL to a file.
   fprintf(stderr, "Downloading %s... ", url);
@@ -166,14 +234,17 @@ FILE* url_to_file(char* url)
   if (!out_file) throw_error("Cannot load URL %s", url);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);            // Set the URL
   curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file); // Set output file
-  int err = curl_easy_perform(curl_handle);
-  if (err) throw_error((char*)curl_easy_strerror(err));
+  int err = 0, retries = 0;
+  do {
+    err = curl_easy_perform(curl_handle);
+    if (retries++ == 5) throw_error((char*)curl_easy_strerror(err));
+  } while (err);
   rewind(out_file);
-  fputs("Done.", stderr);
+  fputs("Done.\n", stderr);
   return out_file;
 }
 
-htmlDocPtr parse_html_file(FILE* fp, char* url)
+static htmlDocPtr parse_html_file(FILE* fp, const char* url)
 {
   xmlSubstituteEntitiesDefault(true);
   htmlDocPtr doc = htmlReadFd(fileno(fp), url, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_NONET);
@@ -181,10 +252,10 @@ htmlDocPtr parse_html_file(FILE* fp, char* url)
   return doc;
 }
 
-node* simplify_html(htmlNodePtr ptr, node* head)
+static const node* simplify_html(htmlNodePtr ptr, const node* head)
 {
   // ptr is the LAST node, and we iterate BACKWARDS, so our linked list is forwards
-  static char* form_action;
+  static const char* form_action;
   static method_t form_method;
   for (; ptr ; ptr = ptr->prev)
   {
@@ -331,7 +402,7 @@ node* simplify_html(htmlNodePtr ptr, node* head)
   return head;
 }
 
-node* alloc_node(node_type type, void* data, node* next)
+const node* alloc_node(node_type type, const void* data, const node* next)
 {
   node* n = malloc(sizeof(*n));
   *n = (node){.type = type, .data = data, .next = next};
@@ -339,7 +410,7 @@ node* alloc_node(node_type type, void* data, node* next)
 }
 
 
-void print_simplified_html(node* ptr)
+void print_simplified_html(const node* ptr)
 {
   for (; ptr ; ptr = ptr->next)
   {
@@ -376,10 +447,11 @@ void print_simplified_html(node* ptr)
   }
 }
 
-void render_simplified_html(node* ptr)
+void render_simplified_html(const node* ptr)
 {
   bool is_seperated = false;
-  int x1, y1, x2, y2; char* url; // hyperlink stuff
+  int x, y, w, h;
+  const char* url; // hyperlink stuff
   const int margin_width = window_width / 8;
   for (; ptr ; ptr = ptr->next)
   {
@@ -415,23 +487,24 @@ void render_simplified_html(node* ptr)
         current_font = regular_font;
         break;
       case hyperlink:
-        x1 = plotter_x;
-        y1 = plotter_y;
+        x = plotter_x;
+        y = plotter_y;
         url = ptr->text;
         text_color = blue;
         break;
       case end_hyperlink:
         if (render)
         {
-          int h = TTF_FontHeight(current_font);
-          x2 = plotter_x;
-          y2 = y1 + h;
-          if (plotter_y > y1)
+          h = TTF_FontHeight(current_font);
+          w = plotter_x - x;
+          if (plotter_y > y)
           {
-            add_hyperlink(url, x1, y1, window_width - margin_width, y2);
-            add_hyperlink(url, margin_width, plotter_y, x2, plotter_y + h);
+            // Multiline hyperlink
+            add_hyperlink(url, x, y, window_width - margin_width - x, h);
+            if (plotter_y - h - y > 0) add_hyperlink(url, margin_width, y + h, window_width - margin_width, plotter_y - h - y);
+            add_hyperlink(url, margin_width, plotter_y, plotter_x - margin_width, h);
           }
-          else add_hyperlink(url, x1, y1, x2, y2);
+          else add_hyperlink(url, x, y, w, h);
         }
         text_color = black;
         break;
@@ -460,21 +533,20 @@ void render_simplified_html(node* ptr)
       case input:
       {
         int height = TTF_FontHeight(regular_font);
-        form* f = ptr->form;
+        const form* f = ptr->form;
         form_list* fl = malloc(sizeof *fl);
         if (plotter_x > margin_width) plotter_y += height;
         plotter_x = margin_width;
         fl->form = f;
         fl->next = forms;
-        fl->x1 = margin_width;
-        fl->y1 = plotter_y + height/2;
-        fl->x2 = window_width - margin_width;
-        fl->y2 = fl->y1 + height;
+        fl->box.x = margin_width;
+        fl->box.y = plotter_y + height/2;
+        fl->box.w = window_width - margin_width*2;
+        fl->box.h = height;
         plotter_y += height * 2;
         forms = fl;
-        SDL_Rect r = (SDL_Rect) {.x = fl->x1, .y = fl->y1, .w=window_width - margin_width*2, .h=height};
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderDrawRect(renderer, &r);
+        SDL_RenderDrawRect(renderer, &fl->box);
       }
       break;
       default:
@@ -517,11 +589,14 @@ new_page:;
 
   FILE* html = url_to_file(current_url);
 
-  curl_easy_getinfo(curl_handle, CURLINFO_EFFECTIVE_URL, &current_url);
-  current_url = strdup(current_url);
+  {
+    char* buf;
+    curl_easy_getinfo(curl_handle, CURLINFO_EFFECTIVE_URL, &buf);
+    current_url = strdup(buf);
+  }
 
   htmlDocPtr doc  = parse_html_file(html, current_url);
-  node* simple    = simplify_html(doc->last, NULL);
+  const node* simple = simplify_html(doc->last, NULL);
   //print_simplified_html(simple);
 
   xmlCleanupParser();
@@ -567,10 +642,10 @@ go_back:
             if (history->next)
             {
               current_url = history->next->full_url;
-              url_list* n = history->next->next;
-              free(history->full_url);
-              free(history->next);
-              free(history);
+              const url_list* n = history->next->next;
+              free((void*)history->full_url);
+              free((void*)history->next);
+              free((void*)history);
               history = n;
               dealloc_nodes(simple);
               xmlFreeDoc(doc);
@@ -591,15 +666,15 @@ go_back:
             xmlFreeDoc(doc);
             goto enter_url;
           }
-          for (form_list* l = forms; l; l = l->next)
+          for (const form_list* l = forms; l; l = l->next)
           {
-            if (l->x1 < x && l->x2 > x && l->y1 < y && l->y2 > y)
+            if (does_intersect_rect(x, y, l->box))
             {
               // Time to make a request.
               static char buf[1024] = "";
-              form* f = l->form;
-              char* url = add_urls(current_url, f->action);
-              char* inp = text_input(url);
+              const form* f = l->form;
+              const char* url = add_urls(current_url, f->action);
+              const char* inp = text_input(url);
               char* inp_esc = curl_easy_escape(curl_handle, inp, strlen(inp));
               if (f->method == post)
               {
@@ -612,7 +687,7 @@ go_back:
                 url = buf;
               }
               current_url = url;
-              free(inp);
+              free((void*)inp);
               curl_free(inp_esc);
               dealloc_nodes(simple);
               xmlFreeDoc(doc);
@@ -622,7 +697,7 @@ go_back:
           for (int i = 0; i < num_hyperlinks; ++i)
           {
             hlink h = hyperlinks[i];
-            if (h.x1 < x && h.x2 > x && h.y1 < y && h.y2 > y)
+            if (does_intersect_rect(x, y, h.box))
             {
               // Clicked!
               current_url = add_urls(current_url, h.url);
@@ -659,18 +734,18 @@ go_back:
   return EXIT_SUCCESS;
 }
 
-void dealloc_nodes(node* n)
+void dealloc_nodes(const node* n)
 {
   if (n)
   {
     dealloc_nodes(n->next);
     if (n->type == image) SDL_FreeSurface(n->image);
-    else if (n->type == hyperlink) free(n->text);
-    free(n);
+    else if (n->type == hyperlink) free((void*)n->text);
+    free((void*)n);
   }
 }
 
-__attribute__((format(printf, 1, 2))) void throw_error(char* fmt, ...)
+__attribute__((format(printf, 1, 2))) void throw_error(const char* fmt, ...)
 {
   fputs("\033[31;1m", stderr);
   va_list args;
@@ -744,7 +819,7 @@ void draw_bar()
   SDL_RenderCopy(renderer, t2, NULL, &urltext);
 }
 
-char* text_input(char* prompt)
+const char* text_input(const char* prompt)
 {
   SDL_Window* input_window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 60, 0);
   SDL_Renderer* input_renderer = SDL_CreateRenderer(input_window, -1, SDL_RENDERER_PRESENTVSYNC);
