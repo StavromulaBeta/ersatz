@@ -161,7 +161,7 @@ static void print_tag_hashes()
 FILE* url_to_file(char* url)
 {
   // Writes data from a URL to a file.
-  printf("Downloading %s... ", url);
+  fprintf(stderr, "Downloading %s... ", url);
   FILE* out_file = tmpfile(); // Make a temporary file
   if (!out_file) throw_error("Cannot load URL %s", url);
   curl_easy_setopt(curl_handle, CURLOPT_URL, url);            // Set the URL
@@ -169,7 +169,7 @@ FILE* url_to_file(char* url)
   int err = curl_easy_perform(curl_handle);
   if (err) throw_error((char*)curl_easy_strerror(err));
   rewind(out_file);
-  puts("Done.");
+  fputs("Done.", stderr);
   return out_file;
 }
 
@@ -303,7 +303,6 @@ node* simplify_html(htmlNodePtr ptr, node* head)
             {
               char* name = (char*)xmlGetProp(ptr, (xmlChar*)"name");
               char* type = (char*)xmlGetProp(ptr, (xmlChar*)"type");
-              //printf("TYPE = %s\n", type);
               if (type && strcmp(type, "text") && strcmp(type, "search")) goto err;
               // Assume type is text because nobody actually uses checkboxes.
               form* f = malloc(sizeof *f);
@@ -395,15 +394,14 @@ void render_simplified_html(node* ptr)
       case seperator:
         if (!is_seperated)
         {
-          plotter_y += TTF_FontHeight(regular_font) * 2;
+          plotter_y += TTF_FontHeight(regular_font) + 25;
           plotter_x = margin_width;
           if (render)
           {
             SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
             SDL_RenderDrawLine(renderer, margin_width/2, plotter_y, window_width - margin_width/2, plotter_y);
           }
-          plotter_y += TTF_FontHeight(regular_font);
-          is_seperated = true;
+          plotter_y += 25;
         }
         break;
       case make_bold:
@@ -439,7 +437,7 @@ void render_simplified_html(node* ptr)
         break;
       case image:
         {
-          plotter_y += TTF_FontHeight(current_font);
+          if (plotter_x > margin_width) plotter_y += TTF_FontHeight(current_font) + 10;
           plotter_x = margin_width;
           int image_width = ptr->image->w;
           int image_height = ptr->image->h;
@@ -452,11 +450,11 @@ void render_simplified_html(node* ptr)
           if (render)
           {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, ptr->image);
-            SDL_Rect rect = {plotter_x, plotter_y, image_width, image_height};
+            SDL_Rect rect = {margin_width, plotter_y, image_width, image_height};
             SDL_RenderCopy(renderer, texture, NULL, &rect);
             SDL_DestroyTexture(texture);
           }
-          plotter_y += image_height;
+          plotter_y += image_height + 10;
         }
         break;
       case input:
@@ -464,26 +462,26 @@ void render_simplified_html(node* ptr)
         int height = TTF_FontHeight(regular_font);
         form* f = ptr->form;
         form_list* fl = malloc(sizeof *fl);
-        plotter_y += height;
+        if (plotter_x > margin_width) plotter_y += height;
+        plotter_x = margin_width;
         fl->form = f;
         fl->next = forms;
-        fl->x1 = 0;
-        fl->y1 = plotter_y;
+        fl->x1 = margin_width;
+        fl->y1 = plotter_y + height/2;
+        fl->x2 = window_width - margin_width;
+        fl->y2 = fl->y1 + height;
         plotter_y += height * 2;
-        plotter_x = 0;
-        fl->y2 = plotter_y;
-        fl->x2 = window_width;
-        plotter_y += height;
         forms = fl;
-        SDL_Rect r = (SDL_Rect) {.x = fl->x1 + margin_width, .y = fl->y1 + height/2, .w=window_width - margin_width, .h=height};
+        SDL_Rect r = (SDL_Rect) {.x = fl->x1, .y = fl->y1, .w=window_width - margin_width*2, .h=height};
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderDrawRect(renderer, &r);
       }
       break;
       default:
-        break;
+      break;
     }
-    if (ptr->type!=seperator) is_seperated = false;
+    if (ptr->type == seperator) is_seperated = true;
+    else is_seperated = false;
   }
 }
 
@@ -553,7 +551,6 @@ new_page:;
     plotter_y = scroll_offset + BAR_HEIGHT;
 
     SDL_PollEvent(&e);
-    //printf("Recieved event %i\n", e.type);
     switch (e.type)
     {
       case SDL_KEYDOWN:
@@ -580,8 +577,6 @@ go_back:
               goto new_page;
             }
         }
-        //printf("Scroll is %i\n", scroll_offset);
-        //SDL_FlushEvent(SDL_KEYDOWN);
         break;
       case SDL_MOUSEBUTTONDOWN:
         if (e.button.button == SDL_BUTTON_LEFT)
@@ -660,7 +655,7 @@ go_back:
   SDL_DestroyWindow(window);
   SDL_Quit();
   curl_easy_cleanup(curl_handle);
-  //print_tag_hashes();
+  print_tag_hashes();
   return EXIT_SUCCESS;
 }
 
