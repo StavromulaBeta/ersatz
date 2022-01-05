@@ -15,7 +15,6 @@
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
 
-#define NUM_HYPERLINKS 1024
 #define BAR_HEIGHT 50
 
 typedef enum { get, post } method_t;
@@ -67,6 +66,12 @@ typedef struct _hlink
   const char* url;
 } hlink;
 
+typedef struct _hlink_list
+{
+  struct _hlink_list* next;
+  hlink link;
+} hlink_list;
+
 typedef struct _url_list
 {
   const struct _url_list *next;
@@ -77,6 +82,7 @@ static const char* text_input(const char*);
 static void draw_bar(void);
 static FILE* url_to_file(const char*);
 static void dealloc_nodes(const node*);
+static void dealloc_forms(const form_list*);
 static _Noreturn void throw_error(const char*, ...);
 static _Noreturn void handle_error_signal(int);
 static void bind_error_signals(void);
@@ -86,12 +92,8 @@ static const node* alloc_node(node_type, const void*, const node*);
 static void print_simplified_html(const node*);
 static void render_simplified_html(const node*);
 
-static SDL_Rect bar;
-static SDL_Rect back;
-static SDL_Rect url;
-static SDL_Rect backtext;
-static SDL_Rect urltext;
-
+#define BACK_RECT      ((SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20})
+#define URL_RECT       ((SDL_Rect) {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20})
 
 static _Bool should_rerender_bar = 1;
 
@@ -102,30 +104,72 @@ static const char* current_url = NULL;
 static CURL* curl_handle;
 static const char* window_title = "";
 
-static int plotter_x = 20, plotter_y = BAR_HEIGHT;
+static int plotter_x = 20;
+static int plotter_y = BAR_HEIGHT;
 static int scroll_offset = 0;
 
 static SDL_Renderer* renderer;
+static SDL_Window*   window;
 
-static const SDL_Color black = {0, 0, 0, 255};
-static const SDL_Color blue  = {0, 0, 255, 255};
-static const SDL_Color gray  = {128, 128, 128, 255};
-static const SDL_Color other_gray = {96, 96, 96, 255};
+
+#define BLACK    ((SDL_Color) {0, 0, 0, 255})
+#define BLUE     ((SDL_Color) {0, 0, 255, 255})
+#define GRAY     ((SDL_Color) {128, 128, 128, 255})
+#define DARKGRAY ((SDL_Color) {96, 96, 96, 255})
+
 static SDL_Color text_color;
+static TTF_Font* current_font;
 
 static TTF_Font* regular_font;
 static TTF_Font* menu_font;
 static TTF_Font* bold_font;
 static TTF_Font* italic_font;
-static TTF_Font* current_font;
 
-static hlink hyperlinks[NUM_HYPERLINKS]; // Why isn't this a linked list!
-static int num_hyperlinks = 0;
+static hlink_list* hyperlinks = NULL;
 
 static int window_width = 640;
 static int window_height = 480;
 
-static const form_list* forms;
+#define MARGIN_WIDTH (window_width/8)
+#define CONTENT_WIDTH (window_width*6/8)
+
+static const form_list* forms = NULL;
+
+static SDL_Cursor* default_cursor;
+static SDL_Cursor* loading_cursor;
+
+static void dealloc_forms(const form_list* l)
+{
+  if (l)
+  {
+    dealloc_forms(l->next);
+    if (l->form)
+    {
+      // TODO
+      //if (l->form->action) free((void*)l->form->action);
+      //if (l->form->method) free((void*)l->form->method);
+      //free((void*)l->form);
+    }
+    free((void*)l);
+  }
+}
+
+static void dealloc_links(const hlink_list* l)
+{
+  if (!l) return;
+  dealloc_links(l->next);
+  free((void*)l);
+}
+
+static void start_loading(void)
+{
+  SDL_SetCursor(loading_cursor);
+}
+
+static void stop_loading(void)
+{
+  SDL_SetCursor(default_cursor);
+}
 
 static _Bool does_intersect_rect(int x, int y, SDL_Rect r)
 {
@@ -139,10 +183,10 @@ static int is_on_screen(int y1, int y2)
 
 static void add_hyperlink(const char* url, int x, int y, int w, int h)
 {
-  if (num_hyperlinks < NUM_HYPERLINKS)
-  {
-    hyperlinks[num_hyperlinks++] = (hlink) {.url=url, .box=(SDL_Rect){.x=x,.y=y,.w=w,.h=h}};
-  }
+  hlink_list* l = malloc(sizeof *l);
+  l->link = (hlink) {.url=url, .box=(SDL_Rect){.x=x,.y=y,.w=w,.h=h}};
+  l->next = hyperlinks;
+  hyperlinks = l;
 }
 
 static char* add_urls(const char* url1, const char* url2)
@@ -163,7 +207,6 @@ static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Fon
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
-  const int margin_width = window_width / 8;
   size_t bytes = strlen(static_text) + 2;
   char* text = malloc(bytes); // We allocate a buffer for our own string...
   char* start = text;
@@ -176,7 +219,7 @@ static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Fon
   bool first_iteration = true;
   do {
     more_lines = false;
-    int wrap_chars = (window_width - plotter_x - margin_width) / char_width; // Calculate how many pixels we have to work with
+    int wrap_chars = (window_width - plotter_x - MARGIN_WIDTH) / char_width; // Calculate how many pixels we have to work with
     int len = 0;
     for (; text[len]; ++len) // Iterate over the string until we find place for a linebreak
     {
@@ -208,7 +251,7 @@ linebreak:
     if (more_lines) // Update the plotter variables...
     {
       plotter_y += char_height; // ...for the next iteration...
-      plotter_x = margin_width;
+      plotter_x = MARGIN_WIDTH;
       text += linebreak_pos + 1;
     }
     else plotter_x += char_width * len; // ...or not
@@ -346,7 +389,6 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
               break;
             case IMG_TAG:
               {
-                // TODO check whether on screen
                 char* src = (char*)xmlGetProp(ptr, (xmlChar*)"src");
                 if (!src) goto err;
                 char* full_url = add_urls(current_url, src);
@@ -452,7 +494,6 @@ void render_simplified_html(const node* ptr)
   bool is_seperated = false;
   int x, y, w, h;
   const char* url; // hyperlink stuff
-  const int margin_width = window_width / 8;
   for (; ptr ; ptr = ptr->next)
   {
     _Bool render = false;
@@ -467,11 +508,11 @@ void render_simplified_html(const node* ptr)
         if (!is_seperated)
         {
           plotter_y += TTF_FontHeight(regular_font) + 25;
-          plotter_x = margin_width;
+          plotter_x = MARGIN_WIDTH;
           if (render)
           {
             SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
-            SDL_RenderDrawLine(renderer, margin_width/2, plotter_y, window_width - margin_width/2, plotter_y);
+            SDL_RenderDrawLine(renderer, MARGIN_WIDTH/2, plotter_y, window_width - MARGIN_WIDTH/2, plotter_y);
           }
           plotter_y += 25;
         }
@@ -490,7 +531,7 @@ void render_simplified_html(const node* ptr)
         x = plotter_x;
         y = plotter_y;
         url = ptr->text;
-        text_color = blue;
+        text_color = BLUE;
         break;
       case end_hyperlink:
         if (render)
@@ -500,30 +541,30 @@ void render_simplified_html(const node* ptr)
           if (plotter_y > y)
           {
             // Multiline hyperlink
-            add_hyperlink(url, x, y, window_width - margin_width - x, h);
-            if (plotter_y - h - y > 0) add_hyperlink(url, margin_width, y + h, window_width - margin_width, plotter_y - h - y);
-            add_hyperlink(url, margin_width, plotter_y, plotter_x - margin_width, h);
+            add_hyperlink(url, x, y, window_width - MARGIN_WIDTH - x, h);
+            if (plotter_y - h - y > 0) add_hyperlink(url, MARGIN_WIDTH, y + h, window_width - MARGIN_WIDTH, plotter_y - h - y);
+            add_hyperlink(url, MARGIN_WIDTH, plotter_y, plotter_x - MARGIN_WIDTH, h);
           }
           else add_hyperlink(url, x, y, w, h);
         }
-        text_color = black;
+        text_color = BLACK;
         break;
       case image:
         {
-          if (plotter_x > margin_width) plotter_y += TTF_FontHeight(current_font) + 10;
-          plotter_x = margin_width;
+          if (plotter_x > MARGIN_WIDTH) plotter_y += TTF_FontHeight(current_font) + 10;
+          plotter_x = MARGIN_WIDTH;
           int image_width = ptr->image->w;
           int image_height = ptr->image->h;
-          if (image_width > (window_width - margin_width*2))
+          if (image_width > (window_width - MARGIN_WIDTH*2))
           {
-            image_height *= (window_width - margin_width*2);
+            image_height *= (window_width - MARGIN_WIDTH*2);
             image_height /= image_width;
-            image_width = window_width - margin_width*2;
+            image_width = window_width - MARGIN_WIDTH*2;
           }
           if (render)
           {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, ptr->image);
-            SDL_Rect rect = {margin_width, plotter_y, image_width, image_height};
+            SDL_Rect rect = {MARGIN_WIDTH, plotter_y, image_width, image_height};
             SDL_RenderCopy(renderer, texture, NULL, &rect);
             SDL_DestroyTexture(texture);
           }
@@ -535,13 +576,13 @@ void render_simplified_html(const node* ptr)
         int height = TTF_FontHeight(regular_font);
         const form* f = ptr->form;
         form_list* fl = malloc(sizeof *fl);
-        if (plotter_x > margin_width) plotter_y += height;
-        plotter_x = margin_width;
+        if (plotter_x > MARGIN_WIDTH) plotter_y += height;
+        plotter_x = MARGIN_WIDTH;
         fl->form = f;
         fl->next = forms;
-        fl->box.x = margin_width;
+        fl->box.x = MARGIN_WIDTH;
         fl->box.y = plotter_y + height/2;
-        fl->box.w = window_width - margin_width*2;
+        fl->box.w = CONTENT_WIDTH;
         fl->box.h = height;
         plotter_y += height * 2;
         forms = fl;
@@ -557,35 +598,60 @@ void render_simplified_html(const node* ptr)
   }
 }
 
-int main(int argc, char** argv)
+static void init_curl(void)
 {
-  bind_error_signals();
-  // Init libcURL
   curl_global_init(CURL_GLOBAL_ALL);
   curl_handle = curl_easy_init();
   curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Ersatz/0.0.1");
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);     // Disable the progress bar
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
-  // Init SDL2
+}
+
+static void init_sdl(void)
+{
   if (SDL_Init(SDL_INIT_EVERYTHING)) throw_error("Failed to initialise the SDL window");
   if (TTF_Init()) throw_error("Failed to initialise SDL_TTF");
   if (IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF | IMG_INIT_WEBP) == 0) throw_error("Failed to init images");
-
-  SDL_Window* window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE);
+  window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, SDL_WINDOW_RESIZABLE);
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
+}
+
+static void init_fonts(void)
+{
   regular_font = TTF_OpenFont("iosevka-term-regular.ttf", 15);
   menu_font    = TTF_OpenFont("iosevka-term-regular.ttf", 22);
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
   italic_font  = TTF_OpenFont("iosevka-term-italic.ttf", 15);
   current_font = regular_font;
-  text_color = black;
+  text_color = BLACK;
+}
+
+static void init_cursors(void)
+{
+  default_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+  loading_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+}
+
+int main(int argc, char** argv)
+{
+  bind_error_signals();
+  init_curl();
+  init_sdl();
+  init_fonts();
+  init_cursors();
 
   if (argc > 1) current_url = argv[1];
   else
     enter_url: current_url = text_input("Enter a URL:");
 
 new_page:;
+  start_loading();
+
+  dealloc_forms(forms);
   forms = NULL;
+
+  dealloc_links(hyperlinks);
+  hyperlinks = NULL;
 
   FILE* html = url_to_file(current_url);
 
@@ -596,33 +662,38 @@ new_page:;
   }
 
   htmlDocPtr doc  = parse_html_file(html, current_url);
-  const node* simple = simplify_html(doc->last, NULL);
-  //print_simplified_html(simple);
 
-  xmlCleanupParser();
   fclose(html);
+  xmlCleanupParser();
+
+  const node* simple = simplify_html(doc->last, NULL);
+
+  //print_simplified_html(simple);
 
   scroll_offset = 0;
 
   SDL_SetWindowTitle(window, window_title);
 
-  url_list* l = malloc(sizeof *l);
-  l->full_url = strdup(current_url);
-  l->next = history;
-  history = l;
+  {
+    url_list* l = malloc(sizeof *l);
+    l->full_url = strdup(current_url);
+    l->next = history;
+    history = l;
+  }
 
   should_rerender_bar = 1;
 
+  stop_loading();
+
   SDL_Event e;
   do {
-    num_hyperlinks = 0;
     SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
     SDL_RenderClear(renderer);
     render_simplified_html(simple);
     draw_bar();
     SDL_RenderPresent(renderer);
 
-    plotter_x = 20;
+    plotter_x = MARGIN_WIDTH;
     plotter_y = scroll_offset + BAR_HEIGHT;
 
     SDL_PollEvent(&e);
@@ -658,9 +729,9 @@ go_back:
         {
           int x = e.button.x;
           int y = e.button.y;
-          if (back.x < x && back.x + back.w > x && back.y < y && back.y + back.h > y)
+          if (does_intersect_rect(x, y, BACK_RECT))
             goto go_back;
-          if (url.x < x && url.x + url.w > x && url.y < y && url.y + url.h > y)
+          if (does_intersect_rect(x, y, URL_RECT))
           {
             dealloc_nodes(simple);
             xmlFreeDoc(doc);
@@ -694,9 +765,9 @@ go_back:
               goto new_page;
             }
           }
-          for (int i = 0; i < num_hyperlinks; ++i)
+          for (hlink_list* l = hyperlinks; l; l=l->next)
           {
-            hlink h = hyperlinks[i];
+            hlink h = l->link;
             if (does_intersect_rect(x, y, h.box))
             {
               // Clicked!
@@ -728,9 +799,11 @@ go_back:
   TTF_Quit();
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  SDL_FreeCursor(default_cursor);
+  SDL_FreeCursor(loading_cursor);
   SDL_Quit();
   curl_easy_cleanup(curl_handle);
-  print_tag_hashes();
+  //print_tag_hashes();
   return EXIT_SUCCESS;
 }
 
@@ -783,40 +856,43 @@ unsigned int insensitive_hash(const char *str)
 void draw_bar()
 {
   static int url_width;
+  static int back_text_width;
+  static int back_text_height;
   static SDL_Texture* t1 = NULL;
   static SDL_Texture* t2 = NULL;
+  const char* back_button_text = " back ";
   if (should_rerender_bar)
   {
     should_rerender_bar = false;
-    int back_text_width;
-    int text_height;
-    TTF_SizeUTF8(menu_font, " back ", &back_text_width, &text_height);
-    TTF_SizeUTF8(menu_font, current_url, &url_width, &text_height);
-    bar = (SDL_Rect)  {.x = 0, .y = 0, .w = window_width, .h = BAR_HEIGHT};
-    back = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20};
-    url = (SDL_Rect)  {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20};
-    backtext = (SDL_Rect) {.x = window_width - 90, .y = 10, .w = back_text_width, .h = text_height};
     if (url_width > window_width - 120) url_width = window_width - 120;
-    urltext = (SDL_Rect) {.x = 15, .y = 10, .w = url_width, .h = text_height};
+    TTF_SizeUTF8(menu_font, back_button_text, &back_text_width, &back_text_height);
     SDL_DestroyTexture(t1);
     SDL_DestroyTexture(t2);
     SDL_Surface* s1;
     SDL_Surface* s2;
-    s1 = TTF_RenderText_Blended(menu_font, " back ", black);
+    s1 = TTF_RenderText_Blended(menu_font, back_button_text, BLACK);
     t1 = SDL_CreateTextureFromSurface(renderer, s1);
-    s2 = TTF_RenderText_Blended(menu_font, current_url, black);
+    s2 = TTF_RenderText_Blended(menu_font, current_url, BLACK);
     t2 = SDL_CreateTextureFromSurface(renderer, s2);
     SDL_FreeSurface(s1);
     SDL_FreeSurface(s2);
   }
+
+  const SDL_Rect back_rect = BACK_RECT;
+  const SDL_Rect url_rect  = URL_RECT;
+
+  const SDL_Rect bar_rect       = ((SDL_Rect){.x = 0, .y = 0, .w = window_width, .h = 50});
+  const SDL_Rect back_text_rect = (SDL_Rect){.x = window_width - 90, .y = 10, .w = back_text_width, .h = back_text_height};
+  const SDL_Rect url_text_rect  = ((SDL_Rect){.x = 15, .y = 10, .w = url_width, .h = 22});
+
   SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
-  SDL_RenderFillRect(renderer, &bar);
+  SDL_RenderFillRect(renderer, &bar_rect);
   SDL_SetRenderDrawColor(renderer, 192, 192, 192, 255);
-  SDL_RenderDrawRect(renderer, &bar);
-  SDL_RenderDrawRect(renderer, &back);
-  SDL_RenderDrawRect(renderer, &url);
-  SDL_RenderCopy(renderer, t1, NULL, &backtext);
-  SDL_RenderCopy(renderer, t2, NULL, &urltext);
+  SDL_RenderDrawRect(renderer, &bar_rect);
+  SDL_RenderDrawRect(renderer, &back_rect);
+  SDL_RenderDrawRect(renderer, &url_rect);
+  SDL_RenderCopy(renderer, t1, NULL, &back_text_rect);
+  SDL_RenderCopy(renderer, t2, NULL, &url_text_rect);
 }
 
 const char* text_input(const char* prompt)
@@ -827,7 +903,7 @@ const char* text_input(const char* prompt)
   int prompt_height;
   TTF_SizeUTF8(regular_font, prompt, &prompt_width, &prompt_height);
   SDL_Rect prompt_rect = (SDL_Rect) {.x = 10, .y = 10, .w = prompt_width, .h = prompt_height};
-  SDL_Surface* prompt_surface = TTF_RenderText_Blended(regular_font, prompt, black);
+  SDL_Surface* prompt_surface = TTF_RenderText_Blended(regular_font, prompt, BLACK);
   SDL_Texture* prompt_texture = SDL_CreateTextureFromSurface(input_renderer, prompt_surface);
   SDL_SetTextInputRect(&prompt_rect);
   SDL_StartTextInput();
@@ -842,7 +918,7 @@ const char* text_input(const char* prompt)
     SDL_Rect input_rect = (SDL_Rect) {.x = 10, .y = 10 + prompt_height, .w = input_width, .h = input_height};
     SDL_SetRenderDrawColor(input_renderer, 242, 233, 234, 255);
     SDL_RenderClear(input_renderer);
-    SDL_Surface* input_surface = TTF_RenderText_Blended(regular_font, text, black);
+    SDL_Surface* input_surface = TTF_RenderText_Blended(regular_font, text, BLACK);
     SDL_Texture* input_texture = SDL_CreateTextureFromSurface(input_renderer, input_surface);
     SDL_RenderCopy(input_renderer, prompt_texture, NULL, &prompt_rect);
     SDL_RenderCopy(input_renderer, input_texture, NULL, &input_rect);
