@@ -458,33 +458,16 @@ void print_simplified_html(const node* ptr)
   {
     switch (ptr->type)
     {
-      case text:
-        printf("[TEXT]: %s\n", ptr->text);
-        break;
-      case seperator:
-        printf("[SEPERATOR]\n");
-        break;
-      case make_bold:
-        printf("[BEGIN BOLD]\n");
-        break;
-      case remove_bold:
-        printf("[END BOLD]\n");
-        break;
-      case make_italic:
-        printf("[BEGIN ITALIC]\n");
-        break;
-      case remove_italic:
-        printf("[END ITALIC]\n");
-        break;
-      case hyperlink:
-        printf("[HYPERLINK TO %s]\n", ptr->text);
-        break;
-      case end_hyperlink:
-        printf("[END HYPERLINK]\n");
-        break;
-      case image:
-        printf("[IMAGE %p]\n", (void*)ptr->image);
-      default:;
+      case text          : puts(ptr->text); break;
+      case seperator     : puts("[SEPERATOR]"); break;
+      case make_bold     : puts("[BEGIN BOLD]"); break;
+      case remove_bold   : puts("[END BOLD]"); break;
+      case make_italic   : puts("[BEGIN ITALIC]"); break;
+      case remove_italic : puts("[END ITALIC]"); break;
+      case hyperlink     : printf("[HYPERLINK TO %s]\n", ptr->text); break;
+      case end_hyperlink : puts("[END HYPERLINK]"); break;
+      case image         : printf("[IMAGE AT %p]\n", (void*)ptr->image); break;
+      default            : break;
     }
   }
 }
@@ -523,7 +506,7 @@ void render_simplified_html(const node* ptr)
       case make_italic:
         current_font = italic_font;
         break;
-      case remove_italic:
+      case remove_italic: 
       case remove_bold:
         current_font = regular_font;
         break;
