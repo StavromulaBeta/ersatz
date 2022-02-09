@@ -17,25 +17,25 @@
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
 
-#define BAR_HEIGHT 50
+#define BAR_HEIGHT 50 // The height of the URL bar
 
-typedef enum { get, post } method_t;
+typedef enum { get, post } method_t; // A type of HTTP request
 
-typedef struct _form
+typedef struct _form // An HTML input form
 {
   const char* name;
   const char* action;
   method_t method;
 } form;
 
-typedef struct _form_list
+typedef struct _form_list // A linked list of input forms
 {
   const struct _form_list* next;
   const form* form;
   SDL_Rect box;
 } form_list;
 
-typedef enum
+typedef enum // A tag specifying what a node does
 {
   text,
   image,
@@ -49,7 +49,7 @@ typedef enum
   input,
 } node_type;
 
-typedef struct _node
+typedef struct _node // A node is a linked list of instructions to render a page
 {
   const struct _node* next;
   node_type type;
@@ -62,19 +62,19 @@ typedef struct _node
   };
 } node;
 
-typedef struct _hlink
+typedef struct _hlink // A hyperlink with a url and a position
 {
   SDL_Rect box;
   const char* url;
 } hlink;
 
-typedef struct _hlink_list
+typedef struct _hlink_list // A list of hyperlinks
 {
   struct _hlink_list* next;
   hlink link;
 } hlink_list;
 
-typedef struct _url_list
+typedef struct _url_list // A list of URLs
 {
   const struct _url_list *next;
   char* full_url;
@@ -94,52 +94,74 @@ static const node* alloc_node(node_type, const void*, const node*);
 static void print_simplified_html(const node*);
 static void render_simplified_html(const node*);
 
+// The size and position of the back button.
 #define BACK_RECT      ((SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20})
+
+// The size and position of the url bar.
 #define URL_RECT       ((SDL_Rect) {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20})
 
+// If this is one, the url bar will be rerendered next frame
 static _Bool should_rerender_bar = 1;
 
+// Linked list of previous urls
 static const url_list* history;
 
+// Current url as string
 static const char* current_url = NULL;
 
 static CURL* curl_handle;
+
+// Title for window manager
 static const char* window_title = "";
 
+// Position to render next element
 static int plotter_x = 20;
 static int plotter_y = BAR_HEIGHT;
+
+// Offset to plotter_y by scrolling
 static int scroll_offset = 0;
 
 static SDL_Renderer* renderer;
 static SDL_Window*   window;
 
-
+// Some colours TODO
 #define BLACK    ((SDL_Color) {0, 0, 0, 255})
 #define BLUE     ((SDL_Color) {0, 0, 255, 255})
 #define GRAY     ((SDL_Color) {128, 128, 128, 255})
 #define DARKGRAY ((SDL_Color) {96, 96, 96, 255})
 
+// Colour to render text in
 static SDL_Color text_color;
+// Font to render text in
 static TTF_Font* current_font;
 
+// Possible values for current_font.
 static TTF_Font* regular_font;
 static TTF_Font* menu_font;
 static TTF_Font* bold_font;
 static TTF_Font* italic_font;
 
+// All hyperlinks on current page
 static hlink_list* hyperlinks = NULL;
 
+// Window dimensions
 static int window_width = 640;
 static int window_height = 480;
 
+// Width of margins and content between them
 #define MARGIN_WIDTH (window_width/8)
 #define CONTENT_WIDTH (window_width*6/8)
 
+// All input forms on a page
 static const form_list* forms = NULL;
 
+// Possible cursors to set
 static SDL_Cursor* default_cursor;
 static SDL_Cursor* loading_cursor;
 
+/*
+  dealloc_forms() takes a list of forms and deallocates them all
+*/
 static void dealloc_forms(const form_list* l)
 {
   if (l)
@@ -156,6 +178,9 @@ static void dealloc_forms(const form_list* l)
   }
 }
 
+/*
+  dealloc_links() takes a list of hyperlinks and deallocates them all
+*/
 static void dealloc_links(const hlink_list* l)
 {
   if (!l) return;
@@ -163,21 +188,33 @@ static void dealloc_links(const hlink_list* l)
   free((void*)l);
 }
 
+/*
+  start_loading() sets the cursor to the spinny boi
+*/
 static void start_loading(void)
 {
   SDL_SetCursor(loading_cursor);
 }
 
+/*
+  stop_loading() sets the cursor to the pointy one
+*/
 static void stop_loading(void)
 {
   SDL_SetCursor(default_cursor);
 }
 
+/*
+  does_intersect_with() returns true when x,y is inside rect r, false otherwise
+*/
 static _Bool does_intersect_rect(int x, int y, SDL_Rect r)
 {
   return (x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h);
 }
 
+/*
+  is_on_screen() returns true if x,y is on the screen, false otherwise
+*/
 static int is_on_screen(int y1, int y2)
 {
   return y1 > scroll_offset || y2 < scroll_offset + window_height;
