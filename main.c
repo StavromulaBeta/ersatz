@@ -220,6 +220,9 @@ static int is_on_screen(int y1, int y2)
   return y1 > scroll_offset || y2 < scroll_offset + window_height;
 }
 
+/*
+  add_hyperlink() adds a hyperlink with x, y, and url to the global hyperlink list
+*/
 static void add_hyperlink(const char* url, int x, int y, int w, int h)
 {
   hlink_list* l = malloc(sizeof *l);
@@ -228,6 +231,9 @@ static void add_hyperlink(const char* url, int x, int y, int w, int h)
   hyperlinks = l;
 }
 
+/*
+  add_urls() appends two relative or nonrelative urls
+*/
 static char* add_urls(const char* url1, const char* url2)
 {
   char* ret;
@@ -242,6 +248,10 @@ static char* add_urls(const char* url1, const char* url2)
   return ret;
 }
 
+/*
+  render_text() draws text to the screen in a specified font. 'render' specifies whether to actually draw or simulate drawing.
+  This implements a home-grown organic text wrapping algorithm.
+*/
 static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Font* font, bool render)
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
@@ -299,6 +309,9 @@ linebreak:
   free(start);
 }
 
+/*
+  print_tag_hashes() is a debugging function to print the hashes for the html tags so i can put them in a switch.
+*/
 static void print_tag_hashes(void)
 {
   char* arr[] = {"TR", "TD", "TH", "TITLE", "P", "A", "I", "B", "BR", "SCRIPT", "STYLE", "EM", "H1", "H2", "H3", "H4", "H5", "H6", "IMG", "FORM", "INPUT"};
@@ -308,6 +321,11 @@ static void print_tag_hashes(void)
   }
 }
 
+/*
+  url_to_file() downloads to url to a temporary file, returning a file handle.
+  There is no caching.
+  There are no parallel downloads.
+*/
 static FILE* url_to_file(const char* url)
 {
   // Writes data from a URL to a file.
@@ -326,6 +344,9 @@ static FILE* url_to_file(const char* url)
   return out_file;
 }
 
+/*
+  parse_html_file() reads a file pointer and parses it with libxml
+*/
 static htmlDocPtr parse_html_file(FILE* fp, const char* url)
 {
   xmlSubstituteEntitiesDefault(true);
@@ -334,6 +355,9 @@ static htmlDocPtr parse_html_file(FILE* fp, const char* url)
   return doc;
 }
 
+/*
+  simplify_html() converts libxml's ast into my own. The second argument specifies the next node.
+*/
 static const node* simplify_html(htmlNodePtr ptr, const node* head)
 {
   // ptr is the LAST node, and we iterate BACKWARDS, so our linked list is forwards
@@ -483,6 +507,9 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
   return head;
 }
 
+/*
+  alloc_node() simply allocates a node in memory, with arguments for the struct fields
+*/
 const node* alloc_node(node_type type, const void* data, const node* next)
 {
   node* n = malloc(sizeof(*n));
@@ -490,7 +517,9 @@ const node* alloc_node(node_type type, const void* data, const node* next)
   return n;
 }
 
-
+/*
+  print_simplified_html() is a debugging function to print a simplified html data structure.
+*/
 void print_simplified_html(const node* ptr)
 {
   for (; ptr ; ptr = ptr->next)
@@ -511,6 +540,11 @@ void print_simplified_html(const node* ptr)
   }
 }
 
+/*
+  render_simplified_html() renders the simplified html data structure to the screen, including images.
+  It adds hyperlinks and forms to their global lists respectively.
+  It adjusts for scrolling.
+*/
 void render_simplified_html(const node* ptr)
 {
   bool is_seperated = false;
@@ -620,6 +654,9 @@ void render_simplified_html(const node* ptr)
   }
 }
 
+/*
+  init_curl() inits curl innit.
+*/
 static void init_curl(void)
 {
   curl_global_init(CURL_GLOBAL_ALL);
@@ -629,6 +666,9 @@ static void init_curl(void)
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
 }
 
+/*
+  init_sdl() inits sdl innit.
+*/
 static void init_sdl(void)
 {
   if (SDL_Init(SDL_INIT_EVERYTHING)) throw_error("Failed to initialise the SDL window");
@@ -638,6 +678,9 @@ static void init_sdl(void)
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
 }
 
+/*
+  init_fonts() inits fonts innit.
+*/
 static void init_fonts(void)
 {
   regular_font = TTF_OpenFont("iosevka-term-regular.ttf", 15);
@@ -648,12 +691,21 @@ static void init_fonts(void)
   text_color = BLACK;
 }
 
+/*
+  init_cursors() inits cursors innit.
+*/
 static void init_cursors(void)
 {
   default_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
   loading_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
 }
 
+/*
+  The main function calls all the other functions.
+  It includes the main event loop.
+  It has internal control flow using goto statements.
+  This was a mistake.
+*/
 int main(int argc, char** argv)
 {
   bind_error_signals();
@@ -829,6 +881,10 @@ go_back:
   return EXIT_SUCCESS;
 }
 
+/*
+  dealloc_nodes() deallocates a list of nodes.
+  It also tries to deallocate their contents.
+*/
 void dealloc_nodes(const node* n)
 {
   if (n)
@@ -840,6 +896,9 @@ void dealloc_nodes(const node* n)
   }
 }
 
+/*
+  throw_error() prints a pretty error message.
+*/
 __attribute__((format(printf, 1, 2))) void throw_error(const char* fmt, ...)
 {
   fputs("\033[31;1m", stderr);
@@ -854,17 +913,26 @@ __attribute__((format(printf, 1, 2))) void throw_error(const char* fmt, ...)
   exit(EXIT_FAILURE);
 }
 
+/*
+  bind_signals() binds each signal to the signal handler function.
+*/
 void bind_error_signals()
 {
   char signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGABRT, SIGBUS, SIGFPE, SIGSEGV, SIGPIPE, SIGTERM, SIGCHLD };
   for (size_t i = 0; i < sizeof(signals); ++i) signal(signals[i], handle_error_signal);
 }
 
+/*
+  handle_error_signal() is a signal handler that just prints an error.
+*/
 _Noreturn void handle_error_signal(int sig)
 {
   throw_error("Recieved signal %i (%s)", sig, strsignal(sig));
 }
 
+/*
+  insensitive_hash() generates a unique integer from a string so we can switch on html tags
+*/
 unsigned int insensitive_hash(const char *str)
 {
   // http://www.cse.yorku.ca/~oz/hash.html
@@ -875,6 +943,10 @@ unsigned int insensitive_hash(const char *str)
   return hash;
 }
 
+/*
+  draw_bar() draws the bar at the top of the screen, with the current url and a back button.
+  It uses the should_rerender_bar variable - which is set if the entire bar needs to be redrawn
+*/
 void draw_bar()
 {
   static int url_width;
@@ -917,6 +989,10 @@ void draw_bar()
   SDL_RenderCopy(renderer, t2, NULL, &url_text_rect);
 }
 
+/*
+  text_input() opens a prompt, and the user will input text then press enter.
+  The entered text is returned as a string.
+*/
 const char* text_input(const char* prompt)
 {
   SDL_Window* input_window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 60, 0);
