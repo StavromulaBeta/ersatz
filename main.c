@@ -95,10 +95,9 @@ static void print_simplified_html(const node*);
 static void render_simplified_html(const node*);
 
 // The size and position of the back button.
-#define BACK_RECT      ((SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20})
-
+#define BACK_RECT ((SDL_Rect) {.x = window_width - 90, .y = 10, .w = 80, .h = BAR_HEIGHT - 20})
 // The size and position of the url bar.
-#define URL_RECT       ((SDL_Rect) {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20})
+#define URL_RECT  ((SDL_Rect) {.x = 10, .y = 10, .w = window_width - 110, .h = BAR_HEIGHT - 20})
 
 // If this is one, the url bar will be rerendered next frame
 static _Bool should_rerender_bar = 1;
@@ -209,7 +208,7 @@ static void stop_loading(void)
 */
 static _Bool does_intersect_rect(int x, int y, SDL_Rect r)
 {
-  return (x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h);
+  return x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h;
 }
 
 /*
@@ -256,6 +255,7 @@ static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Fon
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
+  printf("text : %s\n", static_text);
   size_t bytes = strlen(static_text) + 2;
   char* text = malloc(bytes); // We allocate a buffer for our own string...
   char* start = text;
@@ -290,7 +290,8 @@ linebreak:
     if (render)
     {
 
-      SDL_Surface* surface = TTF_RenderText_Blended(font, text, text_color); // Render our line - only up to the null byte
+      printf("rendertext : %s\n", text);
+      SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, text_color); // Render our line - only up to the null byte
       SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
       SDL_Rect rect = {plotter_x, plotter_y, char_width * len, char_height};
       SDL_RenderCopy(renderer, texture, NULL, &rect);
@@ -494,7 +495,7 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
         break;
       case XML_TEXT_NODE:
         {
-          char* str = (char*)ptr->content;
+          char* str = (char*)xmlNodeGetContent(ptr);
           for (char* ptr = str; *ptr ; ptr++) // Delete all newlines
             if (*ptr == '\n') *ptr = ' ';
           if (str[strspn(str, " \r\t")] != '\0') // trick to remove whitespace lines.
@@ -579,7 +580,7 @@ void render_simplified_html(const node* ptr)
       case make_italic:
         current_font = italic_font;
         break;
-      case remove_italic: 
+      case remove_italic:
       case remove_bold:
         current_font = regular_font;
         break;
@@ -714,9 +715,16 @@ int main(int argc, char** argv)
   init_fonts();
   init_cursors();
 
-  if (argc > 1) current_url = argv[1];
-  else
-    enter_url: current_url = text_input("Enter a URL:");
+  switch (argc)
+  {
+    case 5: // Do colours stuff
+    case 2:
+    enter_url:
+    current_url = argv[1];
+    break;
+    default:
+    throw_error("invalid arguments");
+  }
 
 new_page:;
   start_loading();
@@ -735,7 +743,7 @@ new_page:;
     current_url = strdup(buf);
   }
 
-  htmlDocPtr doc  = parse_html_file(html, current_url);
+  htmlDocPtr doc = parse_html_file(html, current_url);
 
   fclose(html);
   xmlCleanupParser();
@@ -958,6 +966,7 @@ void draw_bar()
   if (should_rerender_bar)
   {
     should_rerender_bar = false;
+    TTF_SizeUTF8(menu_font, current_url, &url_width, NULL);
     if (url_width > window_width - 120) url_width = window_width - 120;
     TTF_SizeUTF8(menu_font, back_button_text, &back_text_width, &back_text_height);
     SDL_DestroyTexture(t1);
@@ -973,11 +982,11 @@ void draw_bar()
   }
 
   const SDL_Rect back_rect = BACK_RECT;
-  const SDL_Rect url_rect  = URL_RECT;
+  const SDL_Rect url_rect = URL_RECT;
 
   const SDL_Rect bar_rect       = ((SDL_Rect){.x = 0, .y = 0, .w = window_width, .h = 50});
   const SDL_Rect back_text_rect = (SDL_Rect){.x = window_width - 90, .y = 10, .w = back_text_width, .h = back_text_height};
-  const SDL_Rect url_text_rect  = ((SDL_Rect){.x = 15, .y = 10, .w = url_width, .h = 22});
+  const SDL_Rect url_text_rect  = ((SDL_Rect){.x = 15, .y = 15, .w = url_width, .h = 20});
 
   SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
   SDL_RenderFillRect(renderer, &bar_rect);
