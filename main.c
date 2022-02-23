@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <execinfo.h>
+#include <regex.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -16,6 +17,23 @@
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
+
+int fg_r = 0,
+    fg_g = 0,
+    fg_b = 0,
+    sp_r = 192,
+    sp_g = 192,
+    sp_b = 192,
+    hl_r = 0,
+    hl_g = 0,
+    hl_b = 255,
+    bg_r = 242,
+    bg_g = 233,
+    bg_b = 234;
+
+#define FGCOLOUR ((SDL_Color) {fg_r, fg_g, fg_b, 255})
+#define BGCOLOUR ((SDL_Color) {bg_r, bg_g, bg_b, 255})
+#define HLCOLOUR ((SDL_Color) {hl_r, hl_g, hl_b, 255})
 
 #define BAR_HEIGHT 50 // The height of the URL bar
 
@@ -122,12 +140,6 @@ static int scroll_offset = 0;
 
 static SDL_Renderer* renderer;
 static SDL_Window*   window;
-
-// Some colours TODO
-#define BLACK    ((SDL_Color) {0, 0, 0, 255})
-#define BLUE     ((SDL_Color) {0, 0, 255, 255})
-#define GRAY     ((SDL_Color) {128, 128, 128, 255})
-#define DARKGRAY ((SDL_Color) {96, 96, 96, 255})
 
 // Colour to render text in
 static SDL_Color text_color;
@@ -586,7 +598,7 @@ void render_simplified_html(const node* ptr)
           plotter_x = MARGIN_WIDTH;
           if (render)
           {
-            SDL_SetRenderDrawColor(renderer, 192, 192, 192, SDL_ALPHA_OPAQUE);
+            SDL_SetRenderDrawColor(renderer, sp_r, sp_g, sp_b, SDL_ALPHA_OPAQUE);
             SDL_RenderDrawLine(renderer, MARGIN_WIDTH/2, plotter_y, window_width - MARGIN_WIDTH/2, plotter_y);
           }
           plotter_y += 25;
@@ -606,7 +618,7 @@ void render_simplified_html(const node* ptr)
         x = plotter_x;
         y = plotter_y;
         url = ptr->text;
-        text_color = BLUE;
+        text_color = HLCOLOUR;
         break;
       case end_hyperlink:
         if (render)
@@ -622,7 +634,7 @@ void render_simplified_html(const node* ptr)
           }
           else add_hyperlink(url, x, y, w, h);
         }
-        text_color = BLACK;
+        text_color = FGCOLOUR;
         break;
       case image:
         {
@@ -661,7 +673,7 @@ void render_simplified_html(const node* ptr)
         fl->box.h = height;
         plotter_y += height * 2;
         forms = fl;
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_SetRenderDrawColor(renderer, fg_r, fg_g, fg_b, SDL_ALPHA_OPAQUE);
         SDL_RenderDrawRect(renderer, &fl->box);
       }
       break;
@@ -708,7 +720,7 @@ static void init_fonts(void)
   bold_font    = TTF_OpenFont("iosevka-term-bold.ttf", 15);
   italic_font  = TTF_OpenFont("iosevka-term-italic.ttf", 15);
   current_font = regular_font;
-  text_color = BLACK;
+  text_color = FGCOLOUR;
 }
 
 /*
@@ -718,6 +730,19 @@ static void init_cursors(void)
 {
   default_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
   loading_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+}
+
+void parse_args(int argc, char** argv)
+{
+  for (int i = 1 ; i < argc ; ++i)
+  {
+    sscanf(argv[i], "--bg=#%2x%2x%2x", &bg_r, &bg_g, &bg_b);
+    sscanf(argv[i], "--fg=#%2x%2x%2x", &fg_r, &fg_g, &fg_b);
+    sscanf(argv[i], "--hl=#%2x%2x%2x", &hl_r, &hl_g, &hl_b);
+    sscanf(argv[i], "--sp=#%2x%2x%2x", &sp_r, &sp_g, &sp_b);
+    if (strcmp("--url=", argv[i]) < 0)
+      current_url = argv[i] + 6;
+  }
 }
 
 /*
@@ -734,17 +759,12 @@ int main(int argc, char** argv)
   init_fonts();
   init_cursors();
 
-  switch (argc)
+  parse_args(argc, argv);
+
+  if (!current_url)
   {
-    case 2:
-    current_url = argv[1];
-    break;
-    case 1:
     enter_url:
     current_url = text_input("Enter URL");
-    break;
-    default:
-    throw_error("invalid arguments");
   }
 
 new_page:;
@@ -790,7 +810,7 @@ new_page:;
 
   SDL_Event e;
   do {
-    SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
+    SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, 255);
     SDL_RenderClear(renderer);
     render_simplified_html(simple);
     draw_bar();
@@ -994,9 +1014,9 @@ void draw_bar()
     SDL_DestroyTexture(t2);
     SDL_Surface* s1;
     SDL_Surface* s2;
-    s1 = TTF_RenderUTF8_Blended(menu_font, back_button_text, BLACK);
+    s1 = TTF_RenderUTF8_Blended(menu_font, back_button_text, FGCOLOUR);
     t1 = SDL_CreateTextureFromSurface(renderer, s1);
-    s2 = TTF_RenderUTF8_Blended(menu_font, current_url, BLACK);
+    s2 = TTF_RenderUTF8_Blended(menu_font, current_url, FGCOLOUR);
     t2 = SDL_CreateTextureFromSurface(renderer, s2);
     SDL_FreeSurface(s1);
     SDL_FreeSurface(s2);
@@ -1009,9 +1029,9 @@ void draw_bar()
   const SDL_Rect back_text_rect = (SDL_Rect){.x = window_width - 90, .y = 10, .w = back_text_width, .h = back_text_height};
   const SDL_Rect url_text_rect  = ((SDL_Rect){.x = 15, .y = 15, .w = url_width, .h = 20});
 
-  SDL_SetRenderDrawColor(renderer, 242, 233, 234, 255);
+  SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, 255);
   SDL_RenderFillRect(renderer, &bar_rect);
-  SDL_SetRenderDrawColor(renderer, 192, 192, 192, 255);
+  SDL_SetRenderDrawColor(renderer, sp_r, sp_g, sp_b, 255);
   SDL_RenderDrawRect(renderer, &bar_rect);
   SDL_RenderDrawRect(renderer, &back_rect);
   SDL_RenderDrawRect(renderer, &url_rect);
@@ -1031,7 +1051,7 @@ const char* text_input(const char* prompt)
   int prompt_height;
   TTF_SizeUTF8(regular_font, prompt, &prompt_width, &prompt_height);
   SDL_Rect prompt_rect = (SDL_Rect) {.x = 10, .y = 10, .w = prompt_width, .h = prompt_height};
-  SDL_Surface* prompt_surface = TTF_RenderUTF8_Blended(regular_font, prompt, BLACK);
+  SDL_Surface* prompt_surface = TTF_RenderUTF8_Blended(regular_font, prompt, FGCOLOUR);
   SDL_Texture* prompt_texture = SDL_CreateTextureFromSurface(input_renderer, prompt_surface);
   SDL_SetTextInputRect(&prompt_rect);
   SDL_StartTextInput();
@@ -1044,9 +1064,9 @@ const char* text_input(const char* prompt)
     int input_height;
     TTF_SizeUTF8(regular_font, text, &input_width, &input_height);
     SDL_Rect input_rect = (SDL_Rect) {.x = 10, .y = 10 + prompt_height, .w = input_width, .h = input_height};
-    SDL_SetRenderDrawColor(input_renderer, 242, 233, 234, 255);
+    SDL_SetRenderDrawColor(input_renderer, bg_r, bg_g, bg_b, 255);
     SDL_RenderClear(input_renderer);
-    SDL_Surface* input_surface = TTF_RenderUTF8_Blended(regular_font, text, BLACK);
+    SDL_Surface* input_surface = TTF_RenderUTF8_Blended(regular_font, text, FGCOLOUR);
     SDL_Texture* input_texture = SDL_CreateTextureFromSurface(input_renderer, input_surface);
     SDL_RenderCopy(input_renderer, prompt_texture, NULL, &prompt_rect);
     SDL_RenderCopy(input_renderer, input_texture, NULL, &input_rect);
