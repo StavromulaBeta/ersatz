@@ -159,6 +159,26 @@ static SDL_Cursor* default_cursor;
 static SDL_Cursor* loading_cursor;
 
 /*
+  Not in use
+*/
+static int progress_bar(void* ptr, double total_down, double down, double total_up, double up)
+{
+  (void)ptr;
+  (void)total_up;
+  (void)up;
+  if (!total_down) return 0;
+  int len = (down / total_down) * 80;
+  printf("%3.0f%% ", down / total_down * 100);
+  for (int i = 0; i < len; ++i)
+  {
+    putc('#', stdout);
+  }
+  putc('\r', stdout);
+  fflush(stdout);
+  return 0;
+}
+
+/*
   dealloc_forms() takes a list of forms and deallocates them all
 */
 static void dealloc_forms(const form_list* l)
@@ -255,7 +275,6 @@ static void render_text(const char* static_text, SDL_Renderer* renderer, TTF_Fon
 {
   // This algorithm writes wrapped text to the window and updates the plotter variables accordingly.
   // It assumes that the provided font is monospaced, for simplicity and performance reasons.
-  printf("text : %s\n", static_text);
   size_t bytes = strlen(static_text) + 2;
   char* text = malloc(bytes); // We allocate a buffer for our own string...
   char* start = text;
@@ -290,7 +309,6 @@ linebreak:
     if (render)
     {
 
-      printf("rendertext : %s\n", text);
       SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, text_color); // Render our line - only up to the null byte
       SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
       SDL_Rect rect = {plotter_x, plotter_y, char_width * len, char_height};
@@ -663,6 +681,7 @@ static void init_curl(void)
   curl_global_init(CURL_GLOBAL_ALL);
   curl_handle = curl_easy_init();
   curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Ersatz/0.0.1");
+  //curl_easy_setopt(curl_handle, CURLOPT_PROGRESSFUNCTION, progress_bar);
   curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);     // Disable the progress bar
   curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
 }
@@ -717,10 +736,12 @@ int main(int argc, char** argv)
 
   switch (argc)
   {
-    case 5: // Do colours stuff
     case 2:
-    enter_url:
     current_url = argv[1];
+    break;
+    case 1:
+    enter_url:
+    current_url = text_input("Enter URL");
     break;
     default:
     throw_error("invalid arguments");
@@ -973,9 +994,9 @@ void draw_bar()
     SDL_DestroyTexture(t2);
     SDL_Surface* s1;
     SDL_Surface* s2;
-    s1 = TTF_RenderText_Blended(menu_font, back_button_text, BLACK);
+    s1 = TTF_RenderUTF8_Blended(menu_font, back_button_text, BLACK);
     t1 = SDL_CreateTextureFromSurface(renderer, s1);
-    s2 = TTF_RenderText_Blended(menu_font, current_url, BLACK);
+    s2 = TTF_RenderUTF8_Blended(menu_font, current_url, BLACK);
     t2 = SDL_CreateTextureFromSurface(renderer, s2);
     SDL_FreeSurface(s1);
     SDL_FreeSurface(s2);
@@ -1010,7 +1031,7 @@ const char* text_input(const char* prompt)
   int prompt_height;
   TTF_SizeUTF8(regular_font, prompt, &prompt_width, &prompt_height);
   SDL_Rect prompt_rect = (SDL_Rect) {.x = 10, .y = 10, .w = prompt_width, .h = prompt_height};
-  SDL_Surface* prompt_surface = TTF_RenderText_Blended(regular_font, prompt, BLACK);
+  SDL_Surface* prompt_surface = TTF_RenderUTF8_Blended(regular_font, prompt, BLACK);
   SDL_Texture* prompt_texture = SDL_CreateTextureFromSurface(input_renderer, prompt_surface);
   SDL_SetTextInputRect(&prompt_rect);
   SDL_StartTextInput();
@@ -1025,7 +1046,7 @@ const char* text_input(const char* prompt)
     SDL_Rect input_rect = (SDL_Rect) {.x = 10, .y = 10 + prompt_height, .w = input_width, .h = input_height};
     SDL_SetRenderDrawColor(input_renderer, 242, 233, 234, 255);
     SDL_RenderClear(input_renderer);
-    SDL_Surface* input_surface = TTF_RenderText_Blended(regular_font, text, BLACK);
+    SDL_Surface* input_surface = TTF_RenderUTF8_Blended(regular_font, text, BLACK);
     SDL_Texture* input_texture = SDL_CreateTextureFromSurface(input_renderer, input_surface);
     SDL_RenderCopy(input_renderer, prompt_texture, NULL, &prompt_rect);
     SDL_RenderCopy(input_renderer, input_texture, NULL, &input_rect);
