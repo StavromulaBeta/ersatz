@@ -16,14 +16,15 @@
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
 
-unsigned int fg_r = 0, fg_g = 0, fg_b = 0;
-unsigned int sp_r = 192, sp_g = 192, sp_b = 192;
-unsigned int hl_r = 0, hl_g = 0, hl_b = 255;
-unsigned int bg_r = 242, bg_g = 233, bg_b = 234;
+unsigned int fg_r = 0, fg_g = 0, fg_b = 0;       // Foreground colour
+unsigned int bg_r = 242, bg_g = 233, bg_b = 234; // Background colour
+unsigned int sp_r = 192, sp_g = 192, sp_b = 192; // Seperator colour
+unsigned int hl_r = 0, hl_g = 0, hl_b = 255;     // Hyperlink colour
 
 #define FGCOLOUR ((SDL_Color) {fg_r, fg_g, fg_b, 255})
 #define BGCOLOUR ((SDL_Color) {bg_r, bg_g, bg_b, 255})
 #define HLCOLOUR ((SDL_Color) {hl_r, hl_g, hl_b, 255})
+#define SPCOLOUR ((SDL_Color) {hl_r, hl_g, hl_b, 255})
 
 #define BAR_HEIGHT 50 // The height of the URL bar
 
@@ -85,7 +86,7 @@ typedef struct _hlink_list // A list of hyperlinks
 typedef struct _url_list // A list of URLs
 {
 	const struct _url_list *next;
-	char* full_url;
+	const char* full_url;
 } url_list;
 
 static const char* text_input(const char*);
@@ -187,7 +188,6 @@ static void dealloc_forms(const form_list* l)
 {
 	if (l)
 	{
-		dealloc_forms(l->next);
 		if (l->form)
 		{
 			// TODO
@@ -195,6 +195,7 @@ static void dealloc_forms(const form_list* l)
 			//if (l->form->method) free((void*)l->form->method);
 			//free((void*)l->form);
 		}
+		dealloc_forms(l->next);
 		free((void*)l);
 	}
 }
@@ -460,7 +461,7 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
 							break;
 						case BR_TAG:
 							// Newline
-							head = alloc_node(text, "\n", simplify_html(ptr->last, head));
+							head = alloc_node(text, strdup("\n"), simplify_html(ptr->last, head));
 							break;
 						case A_TAG:
 							// Hyperlink
@@ -496,6 +497,7 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
 							form_action = (char*)xmlGetProp(ptr, (xmlChar*)"action");
 							char* met = (char*)xmlGetProp(ptr, (xmlChar*)"method");
 							form_method = !met || met[0] == 'g' ? get : post;
+							free(met);
 							head = simplify_html(ptr->last, head);
 						}
 						break;
@@ -503,7 +505,13 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
 						{
 							char* name = (char*)xmlGetProp(ptr, (xmlChar*)"name");
 							char* type = (char*)xmlGetProp(ptr, (xmlChar*)"type");
-							if (type && strcmp(type, "text") && strcmp(type, "search")) goto err;
+							if (type && strcmp(type, "text") && strcmp(type, "search"))
+							{
+								free(type);
+								free(name);
+								goto err;
+							}
+							free(type);
 							// Assume type is text because nobody actually uses checkboxes.
 							form* f = malloc(sizeof *f);
 							f->action = form_action;
@@ -524,6 +532,8 @@ static const node* simplify_html(htmlNodePtr ptr, const node* head)
 						if (*ptr == '\n') *ptr = ' ';
 					if (str[strspn(str, " \r\t")] != '\0') // trick to remove whitespace lines.
 						head = alloc_node(text, str, head);
+					else
+						free(str);
 				}
 				break;
 			default: err: head = simplify_html(ptr->last, head); break;
@@ -789,7 +799,9 @@ new_page:;
 	fclose(html);
 	xmlCleanupParser();
 
-	const node* simple = simplify_html(doc->last, NULL);
+	static const node* simple = NULL;
+	dealloc_nodes(simple);
+	simple = simplify_html(doc->last, NULL);
 
 	//print_simplified_html(simple);
 
@@ -799,7 +811,7 @@ new_page:;
 
 	{
 		url_list* l = malloc(sizeof *l);
-		l->full_url = strdup(current_url);
+		l->full_url = current_url;
 		l->next = history;
 		history = l;
 	}
@@ -841,7 +853,6 @@ go_back:
 							free((void*)history->next);
 							free((void*)history);
 							history = n;
-							dealloc_nodes(simple);
 							xmlFreeDoc(doc);
 							goto new_page;
 						}
@@ -856,7 +867,6 @@ go_back:
 						goto go_back;
 					if (does_intersect_rect(x, y, URL_RECT))
 					{
-						dealloc_nodes(simple);
 						xmlFreeDoc(doc);
 						goto enter_url;
 					}
@@ -878,12 +888,12 @@ go_back:
 							else
 							{
 								sprintf(buf, "%s?%s=%s", url, f->name, inp_esc);
-								url = buf;
+								free((void*)url);
+								url = strdup(buf);
 							}
 							current_url = url;
 							free((void*)inp);
 							curl_free(inp_esc);
-							dealloc_nodes(simple);
 							xmlFreeDoc(doc);
 							goto new_page;
 						}
@@ -895,7 +905,6 @@ go_back:
 						{
 							// Clicked!
 							current_url = add_urls(current_url, h.url);
-							dealloc_nodes(simple);
 							xmlFreeDoc(doc);
 							goto new_page;
 						}
@@ -915,6 +924,8 @@ go_back:
 
 	// Cleanup
 	dealloc_nodes(simple);
+	dealloc_forms(forms);
+	dealloc_links(hyperlinks);
 	xmlFreeDoc(doc);
 	TTF_CloseFont(regular_font);
 	TTF_CloseFont(bold_font);
@@ -939,8 +950,21 @@ void dealloc_nodes(const node* n)
 	if (n)
 	{
 		dealloc_nodes(n->next);
-		if (n->type == image) SDL_FreeSurface(n->image);
-		else if (n->type == hyperlink) free((void*)n->text);
+		switch (n->type)
+		{
+			case input:
+				free((void*)n->form->name);
+				free((void*)n->form->action);
+				free((void*)n->form);
+				break;
+			case image:
+				SDL_FreeSurface(n->image);
+				break;
+			case text:
+			case hyperlink:
+				free((void*)n->text);
+				break;
+		}
 		free((void*)n);
 	}
 }
