@@ -16,10 +16,10 @@
 #include <SDL2/SDL_image.h>
 #include "SDL_render.h"
 
-int fg_r = 0, fg_g = 0, fg_b = 0;
-int sp_r = 192, sp_g = 192, sp_b = 192;
-int hl_r = 0, hl_g = 0, hl_b = 255;
-int bg_r = 242, bg_g = 233, bg_b = 234;
+unsigned int fg_r = 0, fg_g = 0, fg_b = 0;
+unsigned int sp_r = 192, sp_g = 192, sp_b = 192;
+unsigned int hl_r = 0, hl_g = 0, hl_b = 255;
+unsigned int bg_r = 242, bg_g = 233, bg_b = 234;
 
 #define FGCOLOUR ((SDL_Color) {fg_r, fg_g, fg_b, 255})
 #define BGCOLOUR ((SDL_Color) {bg_r, bg_g, bg_b, 255})
@@ -734,13 +734,14 @@ void parse_args(int argc, char** argv)
 	for (int i = 1 ; i < argc ; ++i)
 	{
 		// I was originally using regular expressions, but sscnf works much better.
-		sscanf(argv[i], "--bg=#%2x%2x%2x", &bg_r, &bg_g, &bg_b);
-		sscanf(argv[i], "--fg=#%2x%2x%2x", &fg_r, &fg_g, &fg_b);
-		sscanf(argv[i], "--hl=#%2x%2x%2x", &hl_r, &hl_g, &hl_b);
-		sscanf(argv[i], "--sp=#%2x%2x%2x", &sp_r, &sp_g, &sp_b);
-		// strcpmp() return a negative if the second string starts with the first string.
-		if (strcmp("--url=", argv[i]) < 0)
-			current_url = argv[i] + 6;
+		int success = 0;
+		sscanf(argv[i], "--bg=#%2x%2x%2x%n", &bg_r, &bg_g, &bg_b, &success);
+		sscanf(argv[i], "--fg=#%2x%2x%2x%n", &fg_r, &fg_g, &fg_b, &success);
+		sscanf(argv[i], "--hl=#%2x%2x%2x%n", &hl_r, &hl_g, &hl_b, &success);
+		sscanf(argv[i], "--sp=#%2x%2x%2x%n", &sp_r, &sp_g, &sp_b, &success);
+		// strcmp() return a negative if the second string starts with the first string.
+		if (strcmp("--url=", argv[i]) < 0) current_url = argv[i] + 6, success++;
+		if (!success) throw_error("invalid argument");
 	}
 }
 
