@@ -726,6 +726,9 @@ static void init_cursors(void)
 	loading_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
 }
 
+/*
+	parse_args() initialises colours and the url from commandline arguments.
+*/
 void parse_args(int argc, char** argv)
 {
 	for (int i = 1 ; i < argc ; ++i)
