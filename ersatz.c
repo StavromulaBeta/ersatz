@@ -351,7 +351,7 @@ static FILE* url_to_file(const char* url)
 	fprintf(stderr, "Downloading %s... ", url);
 	FILE* out_file = tmpfile(); // Make a temporary file
 	if (!out_file) throw_error("Cannot load URL %s", url);
-	curl_easy_setopt(curl_handle, CURLOPT_URL, url);						// Set the URL
+	curl_easy_setopt(curl_handle, CURLOPT_URL, url);				// Set the URL
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, out_file); // Set output file
 	int err = 0, retries = 0;
 	do {
