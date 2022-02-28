@@ -2,11 +2,11 @@ FLAGS := `sdl2-config --libs --cflags` `curl-config --libs --cflags` `xml2-confi
 DEBUGFLAGS := $(FLAGS) -g -Og -ggdb3
 OPTFLAGS := $(FLAGS) -Ofast -flto -s
 
-optimised: main.c
-	$(CC) main.c -o main $(OPTFLAGS)
+optimised: ersatz.c
+	$(CC) ersatz.c -o ersatz $(OPTFLAGS)
 
-debug: main.c
-	$(CC) main.c -o main $(DEBUGFLAGS)
+debug: ersatz.c
+	$(CC) ersatz.c -o ersatz $(DEBUGFLAGS)
 
 clean:
-	rm -f main
+	rm -f ersatz
