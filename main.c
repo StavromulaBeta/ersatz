@@ -964,6 +964,8 @@ void dealloc_nodes(const node* n)
 			case hyperlink:
 				free((void*)n->text);
 				break;
+			default:
+				break;
 		}
 		free((void*)n);
 	}
