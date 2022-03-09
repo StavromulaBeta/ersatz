@@ -4,7 +4,7 @@ A simple web browser that I am making for my A-level computing project.
 
 ## Build
 
-First make sure you have a working C compiler and install headers for libCurl, libXML2 (AT LEAST 2.9.13), libSDL2, libSDL2-image, and libSDL2-ttf. Then run
+First make sure you have a working C compiler and install headers for libCurl, libXML2 (AT LEAST 2.9.13, webpages will appear blank on earlier versions), libSDL2, libSDL2-image, and libSDL2-ttf. Then run
 
 ```
 make
