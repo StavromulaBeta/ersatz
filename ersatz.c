@@ -1032,6 +1032,7 @@ void draw_bar()
 	const char* back_button_text = " back ";
 	if (should_rerender_bar)
 	{
+		// These things only need initialising when the window is resized.
 		should_rerender_bar = false;
 		TTF_SizeUTF8(menu_font, current_url, &url_width, NULL);
 		if (url_width > window_width - 120) url_width = window_width - 120;
@@ -1055,6 +1056,7 @@ void draw_bar()
 	const SDL_Rect back_text_rect = (SDL_Rect){.x = window_width - 90, .y = 10, .w = back_text_width, .h = back_text_height};
 	const SDL_Rect url_text_rect	= ((SDL_Rect){.x = 15, .y = 15, .w = url_width, .h = 20});
 
+	// This is the actually drawing to the screen bit.
 	SDL_SetRenderDrawColor(renderer, bg_r, bg_g, bg_b, 255);
 	SDL_RenderFillRect(renderer, &bar_rect);
 	SDL_SetRenderDrawColor(renderer, sp_r, sp_g, sp_b, 255);
@@ -1071,6 +1073,8 @@ void draw_bar()
 */
 const char* text_input(const char* prompt)
 {
+	// Initialise the new SDL window, as well as the surface and texture for the prompt.
+	// We also draw the prompt text.
 	SDL_Window* input_window = SDL_CreateWindow("", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 60, 0);
 	SDL_Renderer* input_renderer = SDL_CreateRenderer(input_window, -1, SDL_RENDERER_PRESENTVSYNC);
 	int prompt_width;
@@ -1084,10 +1088,12 @@ const char* text_input(const char* prompt)
 	SDL_Event e;
 	char text[1024] ="\0";
 	int len = 0;
+	// This is the event loop for the prompt.
 	for (;;)
 	{
 		int input_width;
 		int input_height;
+		// Here we draw the currently entered text, then wait for input.
 		TTF_SizeUTF8(regular_font, text, &input_width, &input_height);
 		SDL_Rect input_rect = (SDL_Rect) {.x = 10, .y = 10 + prompt_height, .w = input_width, .h = input_height};
 		SDL_SetRenderDrawColor(input_renderer, bg_r, bg_g, bg_b, 255);
@@ -1100,16 +1106,19 @@ const char* text_input(const char* prompt)
 		SDL_DestroyTexture(input_texture);
 		SDL_FreeSurface(input_surface);
 		SDL_WaitEvent(&e);
+		// Here we handle input.
 		switch (e.type)
 		{
 			case SDL_TEXTINPUT:
 			{
+				// Normal text is appended to the buffer, if it fits.
 				if (len >= 1022) continue;
 				text[len++] = e.text.text[0];
 				text[len] = '\0';
 				break;
 			}
 			case SDL_KEYDOWN:
+			// Return frees up our memory, and returns a copy of the entered string.
 			if (e.key.keysym.sym == SDLK_RETURN)
 			{
 				SDL_FreeSurface(prompt_surface);
@@ -1118,6 +1127,7 @@ const char* text_input(const char* prompt)
 				SDL_DestroyRenderer(input_renderer);
 				return strdup(text);
 			}
+			// Backspace removes a character from the buffer if it's not empty.
 			if (e.key.keysym.sym == SDLK_BACKSPACE && len) text[--len] = '\0';
 		}
 	}
