@@ -1,6 +1,6 @@
 # Ersatz
 ![snazzy logo](logo.png)
-A simple web browser that I am making for my A-level computing project.
+A simple web browser that I (Finn Barber) am making for my A-level computing project.
 
 ## Build
 
